@@ -2,7 +2,8 @@ export interface LoginRequest {
   email: string;
   password: string;
   deviceId?: string;
-  deviceName?: string;
+  deviceModel?: string;  // maps to DeviceModel on backend
+  deviceOs?: string;     // maps to DeviceOS on backend  e.g. "android" | "ios"
 }
 
 export interface LoginResponse {

@@ -1,10 +1,21 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { API_CONFIG } from '../../config/api.config';
 import storageService from '../storage/storageService';
+import { Platform } from 'react-native';
+import { store } from '../../store/store';
+import { logout, updateTokens } from '../../store/slices/authSlice';
+
+const resolveBaseUrl = (): string => {
+  if (Platform.OS === 'android' && API_CONFIG.BASE_URL.includes('localhost')) {
+    return API_CONFIG.BASE_URL.replace('localhost', '10.0.2.2');
+  }
+
+  return API_CONFIG.BASE_URL;
+};
 
 // Create axios instance
 const axiosInstance: AxiosInstance = axios.create({
-  baseURL: `${API_CONFIG.BASE_URL}${API_CONFIG.PREFIX}`,
+  baseURL: `${resolveBaseUrl()}${API_CONFIG.PREFIX}`,
   timeout: API_CONFIG.TIMEOUT,
   headers: {
     'Content-Type': 'application/json',
@@ -23,9 +34,13 @@ axiosInstance.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
       
+      const fullUrl = axiosInstance.getUri(config);
+
       console.log('API Request:', {
         method: config.method?.toUpperCase(),
+        baseURL: config.baseURL,
         url: config.url,
+        fullUrl,
         params: config.params,
       });
       
@@ -73,23 +88,25 @@ axiosInstance.interceptors.response.use(
             { refreshToken }
           );
           
-          const { token, refreshToken: newRefreshToken } = response.data.data;
-          
-          // Save new tokens
+          const responseData = (response.data as any)?.data ?? response.data;
+          const { token, refreshToken: newRefreshToken } = responseData;
+
+          // Save new tokens to AsyncStorage and Redux state
           await storageService.setAuthToken(token);
           await storageService.setRefreshToken(newRefreshToken);
-          
+          store.dispatch(updateTokens({ token, refreshToken: newRefreshToken }));
+
           // Retry original request with new token
           originalRequest.headers.Authorization = `Bearer ${token}`;
           return axiosInstance(originalRequest);
         }
       } catch (refreshError) {
         console.error('Token refresh failed:', refreshError);
-        
-        // Clear auth data and redirect to login
+
+        // Clear auth data and force logout
         await storageService.clearAuthTokens();
-        // TODO: Dispatch logout action or navigate to login
-        
+        store.dispatch(logout());
+
         return Promise.reject(refreshError);
       }
     }

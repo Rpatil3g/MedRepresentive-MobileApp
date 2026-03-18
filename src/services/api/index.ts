@@ -1,0 +1,8 @@
+export { default as authApi } from './authApi';
+export { default as doctorApi } from './doctorApi';
+export { default as visitApi } from './visitApi';
+export { default as dcrApi } from './dcrApi';
+export { default as taskApi } from './taskApi';
+export { default as profileApi } from './profileApi';
+export { default as attendanceApi } from './attendanceApi';
+export { default as tourPlanApi } from './tourPlanApi';

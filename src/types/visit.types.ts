@@ -1,50 +1,135 @@
-import { Doctor } from './doctor.types';
+export interface VisitSampleRequest {
+  productId: string;
+  quantity: number;
+  batchNumber?: string;
+  expiryDate?: string;
+}
 
+export interface VisitPhotoRequest {
+  photoUrl: string;
+  photoType?: string;
+  caption?: string;
+}
+
+export interface VisitSampleResponse {
+  id: string;
+  productId: string;
+  productName: string;
+  packSize?: string;
+  quantity: number;
+  batchNumber?: string;
+  expiryDate?: string;
+}
+
+export interface VisitPhotoResponse {
+  id: string;
+  photoUrl: string;
+  photoType?: string;
+  caption?: string;
+  uploadedAt: string;
+}
+
+// Matches backend VisitResponseDto
 export interface Visit {
   id: string;
   mrId: string;
+  mrName: string;
+  mrEmployeeId: string;
+
+  // Visit Target (flat fields — no nested doctor object)
   doctorId?: string;
+  doctorName?: string;
+  doctorSpecialty?: string;
   chemistId?: string;
-  visitType: 'Doctor' | 'Chemist';
-  checkInTime: string;
-  checkInLocation?: GeoLocation;
+  chemistName?: string;
+  chemistShopName?: string;
+
+  // Visit Details
+  visitDateTime: string;
+  checkInTime?: string;
   checkOutTime?: string;
-  checkOutLocation?: GeoLocation;
+  visitLatitude?: number;
+  visitLongitude?: number;
   distanceFromTargetMeters?: number;
   isGeofenceBreach: boolean;
   isPlannedVisit: boolean;
-  durationMinutes?: number;
-  purposeOfVisit?: string;
-  productsDiscussed?: string;
-  samplesGiven?: string;
-  feedback?: string;
-  nextActionPlan?: string;
+  visitType?: string;
+  visitDurationMinutes: number;
+  visitDurationFormatted: string;
   status: 'Checked-In' | 'Checked-Out' | 'Cancelled';
+
+  // Interaction Details
+  productsDiscussed: string[];
+  issuesDiscussed?: string;
+  feedback?: string;
+  competitorInfo?: string;
+  nextActionPlan?: string;
+
+  // Presentation
+  presentationTimeSeconds: number;
+  presentationTimeFormatted: string;
+  visualsShown: string[];
+  giftsGiven?: string;
+
+  // Order Information
+  isOrderBooked: boolean;
+  orderValue?: number;
+
+  // Samples & Photos
+  samples: VisitSampleResponse[];
+  photos: VisitPhotoResponse[];
+
+  // Metadata
   isSynced: boolean;
-  offlineId?: string;
   createdAt: string;
-  updatedAt: string;
-  doctor?: Doctor;
 }
 
+// Matches backend CheckInVisitDto
 export interface CheckInVisitRequest {
   doctorId?: string;
   chemistId?: string;
-  visitType: 'Doctor' | 'Chemist';
+  checkInTime: string;
   latitude: number;
   longitude: number;
   isPlannedVisit: boolean;
-  purposeOfVisit?: string;
+  visitType?: string;
+  offlineId?: string;
 }
 
+// Matches backend CheckOutVisitDto
 export interface CheckOutVisitRequest {
   visitId: string;
-  latitude: number;
-  longitude: number;
+  checkOutTime: string;
   productsDiscussed?: string;
-  samplesGiven?: string;
+  issuesDiscussed?: string;
   feedback?: string;
+  competitorInfo?: string;
   nextActionPlan?: string;
+  presentationTimeSeconds?: number;
+  visualsShown?: string;
+  giftsGiven?: string;
+  isOrderBooked?: boolean;
+  orderValue?: number;
+  samples?: VisitSampleRequest[];
+  photos?: VisitPhotoRequest[];
+}
+
+// Matches backend UpdateVisitDto
+export interface UpdateVisitRequest {
+  checkOutTime?: string;
+  visitDurationMinutes?: number;
+  productsDiscussed?: string;
+  issuesDiscussed?: string;
+  feedback?: string;
+  competitorInfo?: string;
+  nextActionPlan?: string;
+  presentationTimeSeconds?: number;
+  visualsShown?: string;
+  giftsGiven?: string;
+  isOrderBooked?: boolean;
+  orderValue?: number;
+  samples?: VisitSampleRequest[];
+  photos?: VisitPhotoRequest[];
 }
 
 export interface VisitListRequest {
@@ -52,11 +137,27 @@ export interface VisitListRequest {
   pageSize?: number;
   fromDate?: string;
   toDate?: string;
-  visitType?: 'Doctor' | 'Chemist';
+  visitType?: string;
   status?: string;
+  searchTerm?: string;
 }
 
-export interface GeoLocation {
-  latitude: number;
-  longitude: number;
+// Matches backend SampleInventoryDto
+export interface SampleInventoryItem {
+  productId: string;
+  productName: string;
+  packSize?: string;
+  closingBalance: number;
+  openingBalance: number;
+  received: number;
+  distributedQuantity: number;
+}
+
+// Matches backend SyncOfflineVisitsResultDto
+export interface SyncOfflineVisitsResult {
+  totalRecords: number;
+  successCount: number;
+  failureCount: number;
+  errors: string[];
+  syncedVisitIds: string[];
 }

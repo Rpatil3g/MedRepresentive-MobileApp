@@ -11,10 +11,30 @@ export type AuthStackParamList = {
 // Main Tab Navigator
 export type MainTabParamList = {
   Dashboard: undefined;
+  Attendance: NavigatorScreenParams<AttendanceStackParamList>;
+  TourPlan: NavigatorScreenParams<TourPlanStackParamList>;
   Doctors: NavigatorScreenParams<DoctorStackParamList>;
   Visits: NavigatorScreenParams<VisitStackParamList>;
   DCR: NavigatorScreenParams<DCRStackParamList>;
   More: undefined;
+};
+
+// Attendance Stack
+export type AttendanceStackParamList = {
+  AttendanceHome: undefined;
+  AttendanceHistory: undefined;
+};
+
+// Tour Plan Stack
+export type TourPlanStackParamList = {
+  MTPCalendar: undefined;
+  DayPlanForm: {
+    date: string;
+    month: number;
+    year: number;
+    existingEntry?: import('./tourPlan.types').DraftDayEntry;
+  };
+  MTPSummary: undefined;
 };
 
 // Doctor Stack
@@ -29,6 +49,7 @@ export type VisitStackParamList = {
   VisitList: undefined;
   VisitCheckIn: { doctorId?: string; chemistId?: string };
   VisitDetail: { visitId: string };
+  VisitCheckOut: { visitId: string };
 };
 
 // DCR Stack
@@ -37,6 +58,20 @@ export type DCRStackParamList = {
   CreateDCR: { date?: string };
   DCRDetail: { dcrId: string };
   DCRCalendar: undefined;
+};
+
+// Task Stack
+export type TaskStackParamList = {
+  TaskList: undefined;
+  TaskDetail: { taskId: string };
+};
+
+// More Stack
+export type MoreStackParamList = {
+  More: undefined;
+  TaskList: undefined;
+  TaskDetail: { taskId: string };
+  ChangePassword: undefined;
 };
 
 // Root Navigator

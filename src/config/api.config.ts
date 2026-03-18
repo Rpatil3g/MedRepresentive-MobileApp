@@ -12,13 +12,13 @@ export const API_CONFIG = {
     LOGOUT: '/auth/logout',
     REFRESH_TOKEN: '/auth/refresh-token',
     CHANGE_PASSWORD: '/auth/change-password',
-    CURRENT_USER: '/auth/current-user',
+    CURRENT_USER: '/auth/me',
     
     // Doctors
     DOCTORS: '/doctors',
     DOCTORS_SEARCH: '/doctors/search',
     DOCTORS_NEARBY: '/doctors/nearby',
-    DOCTORS_BY_TERRITORY: '/doctors/territory',
+    DOCTORS_BY_TERRITORY: '/doctors/by-territory',
     
     // Visits
     VISITS: '/visits',
@@ -26,11 +26,12 @@ export const API_CONFIG = {
     VISITS_CHECK_OUT: '/visits/check-out',
     VISITS_TODAY: '/visits/today',
     VISITS_SYNC_OFFLINE: '/visits/sync-offline',
+    VISITS_SAMPLE_INVENTORY: '/visits/sample-inventory',
     
     // DCR
     DCR: '/dcr',
     DCR_MY_DCRS: '/dcr/my-dcrs',
-    DCR_BY_DATE: '/dcr/date',
+    DCR_BY_DATE: '/dcr/by-date',
     DCR_CALENDAR: '/dcr/calendar',
     DCR_SUBMIT: '/dcr/{id}/submit',
     DCR_SUMMARY: '/dcr/summary',
@@ -39,6 +40,7 @@ export const API_CONFIG = {
     // Tasks
     TASKS: '/tasks',
     TASKS_MY_TASKS: '/tasks/my-tasks',
+    TASKS_MY_SUMMARY: '/tasks/my-summary',
     TASKS_SUMMARY: '/tasks/summary',
     TASKS_OVERDUE: '/tasks/overdue',
     TASKS_DUE_TODAY: '/tasks/due-today',
@@ -46,10 +48,19 @@ export const API_CONFIG = {
     
     // Profile
     MEDICAL_REPS: '/medicalreps',
-    MEDICAL_REPS_BY_USER: '/medicalreps/user',
+    MEDICAL_REPS_BY_USER: '/medicalreps/by-user',
     MEDICAL_REPS_TERRITORIES: '/medicalreps/{mrId}/territories',
     
+    // Attendance
+    ATTENDANCE: '/attendance',
+
+    // Tour Plans (MTP)
+    TOUR_PLANS: '/tour-plans',
+
+    // Routes (for MTP day form dropdown)
+    ROUTES: '/routes',
+
     // Reports
-    REPORTS_MR_DASHBOARD: '/reports/mr-dashboard',
+    REPORTS_MR_DASHBOARD: '/reports/dashboards/mr',
   },
 };

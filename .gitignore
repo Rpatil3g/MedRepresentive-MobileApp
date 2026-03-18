@@ -1,9 +1,7 @@
 # OSX
-#
 .DS_Store
 
 # Xcode
-#
 build/
 *.pbxuser
 !default.pbxuser
@@ -23,7 +21,6 @@ DerivedData
 **/.xcode.env.local
 
 # Android/IntelliJ
-#
 build/
 .idea
 .gradle
@@ -35,19 +32,16 @@ local.properties
 !debug.keystore
 .kotlin/
 
+# Android build output
+android/app/build/
+android/.gradle/
+
 # node.js
-#
 node_modules/
 npm-debug.log
 yarn-error.log
 
 # fastlane
-#
-# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
-# screenshots whenever they are needed.
-# For more information about the recommended setup visit:
-# https://docs.fastlane.tools/best-practices/source-control/
-
 **/fastlane/report.xml
 **/fastlane/Preview.html
 **/fastlane/screenshots
@@ -73,3 +67,41 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Environment variables - NEVER commit secrets
+.env
+.env.local
+.env.development
+.env.staging
+.env.production
+.env.*.local
+
+# Keep example env files
+!.env.example
+!.env.development.example
+
+# TypeScript
+*.tsbuildinfo
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# IDE - JetBrains
+.idea/
+*.iws
+*.ipr
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Logs
+logs/
+*.log
+
+# AI assistant / Claude
+.claude/
+
+# Phase/planning docs (optional - remove if you want to track these)
+Phase*.md

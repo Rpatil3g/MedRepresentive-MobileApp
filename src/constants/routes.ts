@@ -33,7 +33,17 @@ export const ROUTES = {
   TASK_LIST: 'TaskList',
   TASK_DETAIL: 'TaskDetail',
   
+  // Attendance Stack
+  ATTENDANCE: 'Attendance',
+  ATTENDANCE_HISTORY: 'AttendanceHistory',
+
+  // Tour Plan Stack
+  TOUR_PLAN: 'TourPlan',
+  MTP_CALENDAR: 'MTPCalendar',
+  MTP_DAY_FORM: 'DayPlanForm',
+  MTP_SUMMARY: 'MTPSummary',
+
   // Profile Stack
   PROFILE: 'Profile',
   EDIT_PROFILE: 'EditProfile',
-};
+} as const;

@@ -12,15 +12,22 @@ export interface Doctor {
   city?: string;
   state?: string;
   pincode?: string;
-  geoLocation?: GeoLocation;
+  routeId?: string;
+  routeName?: string;
   averagePatientPerDay?: number;
   bestTimeToVisit?: string;
   notes?: string;
-  routeId?: string;
   territoryId?: string;
+  territoryName?: string;
+  territoryCode?: string;
+  latitude?: number;
+  longitude?: number;
+  geoLocation?: GeoLocation;
   isActive: boolean;
+  totalVisits?: number;
+  lastVisitDate?: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface GeoLocation {
@@ -30,6 +37,8 @@ export interface GeoLocation {
 
 export interface CreateDoctorRequest {
   doctorName: string;
+  routeId?: string;
+  territoryId?: string;
   qualification?: string;
   specialty?: string;
   category?: string;
@@ -46,16 +55,30 @@ export interface CreateDoctorRequest {
   averagePatientPerDay?: number;
   bestTimeToVisit?: string;
   notes?: string;
-  territoryId?: string;
 }
 
 export interface DoctorListRequest {
-  pageNumber?: number;
-  pageSize?: number;
-  searchQuery?: string;
+  routeId?: string;
+  territoryId?: string;
+  city?: string;
+  state?: string;
   specialty?: string;
   category?: string;
-  city?: string;
-  territoryId?: string;
+  searchTerm?: string;
   isActive?: boolean;
+  hasLocation?: boolean;
+  pageNumber?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortDirection?: 'asc' | 'desc';
+}
+
+export interface PaginatedDoctorList {
+  items: Doctor[];
+  totalCount: number;
+  pageNumber: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
