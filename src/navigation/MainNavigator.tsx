@@ -163,17 +163,7 @@ const TourPlanStackNavigator: React.FC = () => (
     <TourPlanStack.Screen
       name="MTPCalendar"
       component={MTPCalendarScreen}
-      options={({ navigation }) => ({
-        title: 'Monthly Tour Plan',
-        headerRight: () => (
-          <TouchableOpacity
-            onPress={() => navigation.navigate('MTPSummary')}
-            style={{ marginRight: 16 }}
-          >
-            <MaterialCommunityIcons name="view-list" size={24} color={COLORS.textWhite} />
-          </TouchableOpacity>
-        ),
-      })}
+      options={{ headerShown: false }}
     />
     <TourPlanStack.Screen
       name="DayPlanForm"
@@ -234,52 +224,34 @@ const MainNavigator: React.FC = () => {
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.textSecondary,
         tabBarStyle: {
-          borderTopWidth: 1,
-          borderTopColor: COLORS.border,
-          elevation: 8,
+          borderTopWidth: 0,
+          elevation: 12,
           shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 3,
-          height: 60,
-          paddingBottom: 8,
+          shadowOffset: { width: 0, height: -4 },
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          height: 64,
+          paddingBottom: 10,
           paddingTop: 8,
+          borderTopLeftRadius: 20,
+          borderTopRightRadius: 20,
+          backgroundColor: COLORS.background,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '500',
+          fontSize: 11,
+          fontWeight: '600',
         },
       }}
     >
+      {/* ── Visible Tabs ── */}
       <Tab.Screen
         name={ROUTES.DASHBOARD}
         component={DashboardScreen}
         options={{
-          headerShown: true,
-          headerStyle: {
-            backgroundColor: COLORS.background,
-            elevation: 0,
-            shadowOpacity: 0,
-          },
-          headerTitleStyle: {
-            fontWeight: 'bold',
-            fontSize: 24,
-            color: COLORS.textPrimary,
-          },
+          headerShown: false,
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="home" color={color} size={size} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name={ROUTES.ATTENDANCE}
-        component={AttendanceStackNavigator}
-        options={{
-          tabBarLabel: 'Attendance',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="fingerprint" color={color} size={size} />
           ),
         }}
       />
@@ -307,13 +279,32 @@ const MainNavigator: React.FC = () => {
       />
 
       <Tab.Screen
+        name={ROUTES.MORE}
+        component={MoreStackNavigator}
+        options={{
+          tabBarLabel: 'Profile',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="account-circle" color={color} size={size} />
+          ),
+        }}
+      />
+
+      {/* ── Hidden Tabs (accessible via Dashboard quick actions) ── */}
+      <Tab.Screen
+        name={ROUTES.ATTENDANCE}
+        component={AttendanceStackNavigator}
+        options={{
+          tabBarItemStyle: { display: 'none' },
+          tabBarButton: () => null,
+        }}
+      />
+
+      <Tab.Screen
         name={ROUTES.VISITS}
         component={VisitStackNavigator}
         options={{
-          tabBarLabel: 'Visits',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="map-marker-check" color={color} size={size} />
-          ),
+          tabBarItemStyle: { display: 'none' },
+          tabBarButton: () => null,
         }}
       />
 
@@ -321,21 +312,8 @@ const MainNavigator: React.FC = () => {
         name={ROUTES.DCR}
         component={DCRStackNavigator}
         options={{
-          tabBarLabel: 'DCR',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="file-document" color={color} size={size} />
-          ),
-        }}
-      />
-
-      <Tab.Screen
-        name={ROUTES.MORE}
-        component={MoreStackNavigator}
-        options={{
-          tabBarLabel: 'More',
-          tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="menu" color={color} size={size} />
-          ),
+          tabBarItemStyle: { display: 'none' },
+          tabBarButton: () => null,
         }}
       />
     </Tab.Navigator>

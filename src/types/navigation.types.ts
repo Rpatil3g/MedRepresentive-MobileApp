@@ -8,15 +8,16 @@ export type AuthStackParamList = {
   ChangePassword: undefined;
 };
 
-// Main Tab Navigator
+// Main Tab Navigator (4 visible tabs + 3 hidden for quick-action navigation)
 export type MainTabParamList = {
   Dashboard: undefined;
-  Attendance: NavigatorScreenParams<AttendanceStackParamList>;
   TourPlan: NavigatorScreenParams<TourPlanStackParamList>;
   Doctors: NavigatorScreenParams<DoctorStackParamList>;
+  More: NavigatorScreenParams<MoreStackParamList>;
+  // Hidden tabs — accessible via Dashboard quick actions
+  Attendance: NavigatorScreenParams<AttendanceStackParamList>;
   Visits: NavigatorScreenParams<VisitStackParamList>;
   DCR: NavigatorScreenParams<DCRStackParamList>;
-  More: undefined;
 };
 
 // Attendance Stack
