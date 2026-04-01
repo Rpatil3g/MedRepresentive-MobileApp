@@ -19,6 +19,10 @@ export const API_CONFIG = {
     DOCTORS_SEARCH: '/doctors/search',
     DOCTORS_NEARBY: '/doctors/nearby',
     DOCTORS_BY_TERRITORY: '/doctors/by-territory',
+
+    // Territories
+    TERRITORIES: '/territories',
+    TERRITORIES_MY_TERRITORIES: '/territories/my-territories',
     
     // Visits
     VISITS: '/visits',
@@ -59,6 +63,18 @@ export const API_CONFIG = {
 
     // Routes (for MTP day form dropdown)
     ROUTES: '/routes',
+
+    // Products
+    PRODUCTS: '/products',
+    PRODUCTS_CAMPAIGN: '/products/campaign',
+    PRODUCTS_SEARCH: '/products/search',
+
+    // Lookups (admin-managed dropdown values)
+    LOOKUPS: '/lookups',
+
+    // Expenses
+    EXPENSES: '/expenses',
+    EXPENSES_MY_EXPENSES: '/expenses/my-expenses',
 
     // Reports
     REPORTS_MR_DASHBOARD: '/reports/dashboards/mr',

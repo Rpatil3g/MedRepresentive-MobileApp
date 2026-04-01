@@ -43,6 +43,11 @@ export const ROUTES = {
   MTP_DAY_FORM: 'DayPlanForm',
   MTP_SUMMARY: 'MTPSummary',
 
+  // Product Stack
+  PRODUCTS: 'Products',
+  PRODUCT_LIST: 'ProductList',
+  PRODUCT_DETAIL: 'ProductDetail',
+
   // Profile Stack
   PROFILE: 'Profile',
   EDIT_PROFILE: 'EditProfile',

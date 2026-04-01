@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,15 +8,19 @@ import {
   TouchableOpacity,
   StatusBar,
   Platform,
+  Alert,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
+import Geolocation from 'react-native-geolocation-service';
+import DeviceInfo from 'react-native-device-info';
 import { Loading, ErrorMessage } from '../../components/common';
 import { useAppSelector } from '../../store/hooks';
 import { COLORS, SIZES } from '../../constants';
 import { formatDate } from '../../utils/dateUtils';
-import { visitApi } from '../../services/api';
+import { visitApi, attendanceApi } from '../../services/api';
+import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { useAuth } from '../../hooks/useAuth';
 import { MainTabParamList } from '../../types/navigation.types';
 import { Visit } from '../../types/visit.types';
@@ -50,6 +54,8 @@ const DashboardScreen: React.FC = () => {
   });
   const [todayVisits, setTodayVisits] = useState<Visit[]>([]);
   const [isPunchedIn, setIsPunchedIn] = useState(false);
+  const [hasPunchedOut, setHasPunchedOut] = useState(false);
+  const [punchLoading, setPunchLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +64,11 @@ const DashboardScreen: React.FC = () => {
     try {
       setError(null);
 
-      const visitsResponse = await visitApi.getTodayVisits();
+      const [visitsResponse, attendanceStatus] = await Promise.all([
+        visitApi.getTodayVisits(),
+        attendanceApi.getAttendanceStatus(),
+      ]);
+
       const visits: Visit[] = Array.isArray(visitsResponse) ? visitsResponse : [];
 
       const totalOrderValue = visits
@@ -71,6 +81,8 @@ const DashboardScreen: React.FC = () => {
         todayVisits: visits.length,
         orderValue: totalOrderValue,
       }));
+      setIsPunchedIn(attendanceStatus.hasPunchedIn && !attendanceStatus.hasPunchedOut);
+      setHasPunchedOut(attendanceStatus.hasPunchedOut);
     } catch (fetchError) {
       console.error('Dashboard fetch error:', fetchError);
       setError('Failed to load dashboard data');
@@ -80,9 +92,108 @@ const DashboardScreen: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [fetchDashboardData]);
+  const getCurrentLocation = (): Promise<{ latitude: number; longitude: number; address?: string }> =>
+    new Promise((resolve, reject) => {
+      Geolocation.getCurrentPosition(
+        async (pos) => {
+          const { latitude, longitude } = pos.coords;
+          let address: string | undefined;
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+              { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } }
+            );
+            const data = await res.json();
+            address = data.display_name as string | undefined;
+          } catch {
+            // address stays undefined — coordinates-only is still valid
+          }
+          resolve({ latitude, longitude, address });
+        },
+        (err) => reject(new Error(`Location error: ${err.message}`)),
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 },
+      );
+    });
+
+  const handlePunch = useCallback(async () => {
+    if (punchLoading) return;
+
+    // Accidental punch-out guard
+    if (isPunchedIn) {
+      Alert.alert(
+        'Punch Out?',
+        'Are you sure you want to punch out? This will mark your work day as ended.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Punch Out',
+            style: 'destructive',
+            onPress: () => executePunch('out'),
+          },
+        ],
+      );
+      return;
+    }
+
+    // Day already completed guard
+    if (hasPunchedOut) {
+      showAlert('Already Punched Out', 'You have already completed your attendance for today.');
+      return;
+    }
+
+    executePunch('in');
+  }, [isPunchedIn, hasPunchedOut, punchLoading]);
+
+  const executePunch = async (type: 'in' | 'out') => {
+    const hasPermission = await requestLocationPermission();
+    if (!hasPermission) {
+      showAlert('Permission Denied', 'Location permission is required to punch in/out.');
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      const isMock = await DeviceInfo.isMockLocation();
+      if (isMock) {
+        showAlert('Mock Location Detected', 'Fake GPS detected. Attendance cannot be recorded.');
+        return;
+      }
+    }
+
+    setPunchLoading(true);
+    try {
+      const location = await getCurrentLocation();
+      const timestamp = new Date().toISOString();
+
+      if (type === 'in') {
+        let batteryLevel: number | undefined;
+        try {
+          batteryLevel = Math.round((await DeviceInfo.getBatteryLevel()) * 100);
+        } catch { /* non-critical */ }
+        await attendanceApi.punchIn({ timestamp, ...location, batteryLevel });
+        setIsPunchedIn(true);
+        showAlert('Punched In', 'Your attendance has been recorded. Have a productive day!');
+      } else {
+        await attendanceApi.punchOut({ timestamp, ...location });
+        setIsPunchedIn(false);
+        setHasPunchedOut(true);
+        showAlert('Punched Out', 'Your work day has been recorded successfully.');
+      }
+    } catch (err: any) {
+      const isNetworkError = !err?.response && (err?.message === 'Network Error' || err?.code === 'ECONNABORTED');
+      const msg = isNetworkError
+        ? 'No internet connection. Please check your network and try again.'
+        : err?.response?.data?.message ?? err?.message ?? 'Something went wrong';
+      showAlert('Attendance Error', msg);
+    } finally {
+      setPunchLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchDashboardData();
+    }, [fetchDashboardData])
+  );
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -119,7 +230,19 @@ const DashboardScreen: React.FC = () => {
       label: 'Submit DCR',
       color: '#059669',
       bg: COLORS.successLight,
-      onPress: () => navigation.navigate('DCR' as any, { screen: 'CreateDCR' } as any),
+      onPress: () => {
+        const completed = todayVisits.filter(
+          v => v.status === 'Checked-Out' || v.status === 'Completed'
+        );
+        if (completed.length === 0) {
+          showAlert(
+            'No Completed Visits',
+            'You need to complete at least one visit before submitting your DCR for the day.'
+          );
+          return;
+        }
+        navigation.navigate('DCR' as any, { screen: 'CreateDCR' } as any);
+      },
     },
     {
       icon: 'cart-outline',
@@ -159,16 +282,16 @@ const DashboardScreen: React.FC = () => {
           <View style={styles.headerTop}>
             <View>
               <Text style={styles.greeting}>{getGreeting()}</Text>
-              <Text style={styles.userName}>{user?.firstName || 'User'}</Text>
+              <Text style={styles.userName}>{mrProfile?.fullName || user?.firstName || 'User'}</Text>
             </View>
-            <TouchableOpacity style={styles.notifBtn} onPress={logout}>
+            <TouchableOpacity style={styles.notifBtn}>
               <MaterialCommunityIcons name="bell-outline" size={22} color={COLORS.textWhite} />
             </TouchableOpacity>
           </View>
           <View style={styles.locationRow}>
             <MaterialCommunityIcons name="map-marker" size={14} color="rgba(255,255,255,0.8)" />
             <Text style={styles.locationText}>
-              {mrProfile?.territories?.[0] || formatDate(new Date(), 'EEEE, dd MMM yyyy')}
+              {mrProfile?.city || mrProfile?.state || formatDate(new Date(), 'EEEE, dd MMM yyyy')}
             </Text>
           </View>
         </View>
@@ -180,21 +303,28 @@ const DashboardScreen: React.FC = () => {
             <View style={styles.statusRow}>
               <View style={[styles.statusDot, isPunchedIn && styles.statusDotActive]} />
               <Text style={[styles.statusText, isPunchedIn && styles.statusTextActive]}>
-                {isPunchedIn ? 'On-Duty (GPS Active)' : 'Off-Duty'}
+                {hasPunchedOut ? 'Day Completed' : isPunchedIn ? 'On-Duty (GPS Active)' : 'Off-Duty'}
               </Text>
             </View>
           </View>
           <TouchableOpacity
-            style={[styles.punchBtn, isPunchedIn && styles.punchBtnOut]}
-            onPress={() => setIsPunchedIn((v) => !v)}
+            style={[
+              styles.punchBtn,
+              isPunchedIn && styles.punchBtnOut,
+              hasPunchedOut && styles.punchBtnDisabled,
+            ]}
+            onPress={handlePunch}
+            disabled={punchLoading || hasPunchedOut}
             activeOpacity={0.85}
           >
             <MaterialCommunityIcons
-              name={isPunchedIn ? 'stop-circle' : 'fingerprint'}
+              name={hasPunchedOut ? 'check-circle' : isPunchedIn ? 'stop-circle' : 'fingerprint'}
               size={20}
               color={COLORS.textWhite}
             />
-            <Text style={styles.punchBtnText}>{isPunchedIn ? 'Punch Out' : 'Punch In'}</Text>
+            <Text style={styles.punchBtnText}>
+              {punchLoading ? 'Please wait...' : hasPunchedOut ? 'Day Complete' : isPunchedIn ? 'Punch Out' : 'Punch In'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -281,7 +411,7 @@ const DashboardScreen: React.FC = () => {
                 .join('')
                 .toUpperCase();
 
-              const isDone = visit.status === 'Checked-Out';
+              const isDone = visit.status === 'Checked-Out' || visit.status === 'Completed';
               const isActive = visit.status === 'Checked-In';
 
               return (
@@ -464,6 +594,11 @@ const styles = StyleSheet.create({
   punchBtnOut: {
     backgroundColor: COLORS.error,
     shadowColor: COLORS.error,
+  },
+  punchBtnDisabled: {
+    backgroundColor: COLORS.textDisabled,
+    shadowOpacity: 0,
+    elevation: 0,
   },
   punchBtnText: {
     color: COLORS.textWhite,

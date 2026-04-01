@@ -8,16 +8,17 @@ export type AuthStackParamList = {
   ChangePassword: undefined;
 };
 
-// Main Tab Navigator (4 visible tabs + 3 hidden for quick-action navigation)
+// Main Tab Navigator (4 visible tabs + 4 hidden for quick-action navigation)
 export type MainTabParamList = {
   Dashboard: undefined;
   TourPlan: NavigatorScreenParams<TourPlanStackParamList>;
-  Doctors: NavigatorScreenParams<DoctorStackParamList>;
+  Products: NavigatorScreenParams<ProductStackParamList>;
   More: NavigatorScreenParams<MoreStackParamList>;
   // Hidden tabs — accessible via Dashboard quick actions
   Attendance: NavigatorScreenParams<AttendanceStackParamList>;
   Visits: NavigatorScreenParams<VisitStackParamList>;
   DCR: NavigatorScreenParams<DCRStackParamList>;
+  Doctors: NavigatorScreenParams<DoctorStackParamList>;
 };
 
 // Attendance Stack
@@ -36,6 +37,12 @@ export type TourPlanStackParamList = {
     existingEntry?: import('./tourPlan.types').DraftDayEntry;
   };
   MTPSummary: undefined;
+};
+
+// Product Stack
+export type ProductStackParamList = {
+  ProductList: undefined;
+  ProductDetail: { productId: string };
 };
 
 // Doctor Stack

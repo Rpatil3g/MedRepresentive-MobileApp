@@ -66,15 +66,13 @@ const LoginScreen: React.FC = () => {
       >
         <View style={styles.logoContainer}>
           <View style={styles.logoPlaceholder}>
-            <Text style={styles.logoText}>GoodPharma</Text>
+            <Text style={styles.logoText}>GP</Text>
           </View>
-          <Text style={styles.subtitle}>Medical Representative Portal</Text>
+          <Text style={styles.title}>Welcome Back</Text>
+          <Text style={styles.subtitle}>Sign in to your GoodPharma account</Text>
         </View>
 
         <View style={styles.formContainer}>
-          <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.description}>Sign in to continue with your account</Text>
-
           <Controller
             control={control}
             name="email"
@@ -142,9 +140,9 @@ const styles = StyleSheet.create({
     marginBottom: SIZES.paddingXL,
   },
   logoPlaceholder: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 80,
+    height: 80,
+    borderRadius: 18,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -158,6 +156,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: SIZES.fontMD,
     color: COLORS.textSecondary,
+    marginBottom: SIZES.paddingSM,
   },
   formContainer: {
     flex: 1,

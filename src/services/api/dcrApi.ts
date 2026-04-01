@@ -8,27 +8,27 @@ import {
   MonthlyDCRCalendar,
   DCRSummary,
 } from '../../types/dcr.types';
-import { ApiResponse, PaginatedResponse } from '../../types/api.types';
+import { PaginatedResponse } from '../../types/api.types';
 
 class DCRApi {
   async createDCR(data: CreateDCRRequest): Promise<DailyCallReport> {
-    const response = await axiosInstance.post<ApiResponse<DailyCallReport>>(
+    const response = await axiosInstance.post<DailyCallReport>(
       API_CONFIG.ENDPOINTS.DCR,
       data
     );
-    return response.data.data;
+    return response.data;
   }
 
   async getMyDCRs(params: DCRListRequest): Promise<PaginatedResponse<DailyCallReport>> {
-    const response = await axiosInstance.get<ApiResponse<PaginatedResponse<DailyCallReport>>>(
+    const response = await axiosInstance.get<PaginatedResponse<DailyCallReport>>(
       API_CONFIG.ENDPOINTS.DCR_MY_DCRS,
       { params }
     );
-    return response.data.data;
+    return response.data;
   }
 
   async getDCRByDate(date: string): Promise<DailyCallReport | null> {
-    const response = await axiosInstance.get<ApiResponse<DailyCallReport>>(
+    const response = await axiosInstance.get<DailyCallReport>(
       API_CONFIG.ENDPOINTS.DCR_BY_DATE,
       {
         params: { date },
@@ -42,28 +42,28 @@ class DCRApi {
       return null;
     }
 
-    return response.data.data;
+    return response.data;
   }
 
   async getDCRById(id: string): Promise<DailyCallReport> {
-    const response = await axiosInstance.get<ApiResponse<DailyCallReport>>(
+    const response = await axiosInstance.get<DailyCallReport>(
       `${API_CONFIG.ENDPOINTS.DCR}/${id}`
     );
-    return response.data.data;
+    return response.data;
   }
 
   async updateDCR(id: string, data: CreateDCRRequest): Promise<DailyCallReport> {
-    const response = await axiosInstance.put<ApiResponse<DailyCallReport>>(
+    const response = await axiosInstance.put<DailyCallReport>(
       `${API_CONFIG.ENDPOINTS.DCR}/${id}`,
       data
     );
-    return response.data.data;
+    return response.data;
   }
 
   async submitDCR(id: string): Promise<DailyCallReport> {
     const url = API_CONFIG.ENDPOINTS.DCR_SUBMIT.replace('{id}', id);
-    const response = await axiosInstance.post<ApiResponse<DailyCallReport>>(url);
-    return response.data.data;
+    const response = await axiosInstance.post<DailyCallReport>(url);
+    return response.data;
   }
 
   async deleteDCR(id: string): Promise<void> {
@@ -71,28 +71,28 @@ class DCRApi {
   }
 
   async getMonthlyCalendar(month: number, year: number): Promise<DCRCalendarDay[]> {
-    const response = await axiosInstance.get<ApiResponse<MonthlyDCRCalendar>>(
+    const response = await axiosInstance.get<MonthlyDCRCalendar>(
       API_CONFIG.ENDPOINTS.DCR_CALENDAR,
       { params: { month, year } }
     );
     // Backend returns MonthlyDCRCalendarDto wrapper; extract the days array
-    return response.data.data?.days ?? [];
+    return response.data?.days ?? [];
   }
 
   async getDCRSummary(fromDate: string, toDate: string): Promise<DCRSummary> {
-    const response = await axiosInstance.get<ApiResponse<DCRSummary>>(
+    const response = await axiosInstance.get<DCRSummary>(
       API_CONFIG.ENDPOINTS.DCR_SUMMARY,
       { params: { fromDate, toDate } }
     );
-    return response.data.data;
+    return response.data;
   }
 
   async getMyPerformance(fromDate: string, toDate: string): Promise<any> {
-    const response = await axiosInstance.get<ApiResponse<any>>(
+    const response = await axiosInstance.get<any>(
       API_CONFIG.ENDPOINTS.DCR_PERFORMANCE,
       { params: { fromDate, toDate } }
     );
-    return response.data.data;
+    return response.data;
   }
 }
 

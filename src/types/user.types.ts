@@ -1,14 +1,29 @@
 export interface MedicalRepProfile {
   id: string;
   userId: string;
+  fullName: string;
+  email: string;
+  mobileNumber?: string;
   employeeId: string;
+  employeeCode?: string;
   designation?: string;
   department?: string;
   dateOfJoining?: string;
+  dateOfBirth?: string;
+  gender?: string;
   managerId?: string;
   managerName?: string;
-  user: UserProfile;
-  territories: TerritoryAssignment[];
+  headquartersId?: string;
+  headquartersName?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  isActive: boolean;
+  isDeviceLocked?: boolean;
+  lastLoginAt?: string;
+  createdAt?: string;
+  territoryAssignments: TerritoryAssignment[];
 }
 
 export interface TerritoryAssignment {
@@ -28,16 +43,4 @@ export interface Territory {
   state?: string;
   city?: string;
   description?: string;
-}
-
-export interface UserProfile {
-  id: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  fullName: string;
-  mobileNumber?: string;
-  role: string;
-  isActive: boolean;
-  profileImageUrl?: string;
 }

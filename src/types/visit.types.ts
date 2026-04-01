@@ -54,9 +54,11 @@ export interface Visit {
   isGeofenceBreach: boolean;
   isPlannedVisit: boolean;
   visitType?: string;
+  callType?: string;
+  callOutcome?: string;
   visitDurationMinutes: number;
   visitDurationFormatted: string;
-  status: 'Checked-In' | 'Checked-Out' | 'Cancelled';
+  status: 'Checked-In' | 'Checked-Out' | 'Completed' | 'Cancelled';
 
   // Interaction Details
   productsDiscussed: string[];
@@ -82,6 +84,33 @@ export interface Visit {
   // Metadata
   isSynced: boolean;
   createdAt: string;
+}
+
+// Matches backend CreateVisitDto
+export interface CreateVisitRequest {
+  doctorId?: string;
+  chemistId?: string;
+  visitDateTime: string;
+  checkInTime?: string;
+  latitude?: number;
+  longitude?: number;
+  isPlannedVisit: boolean;
+  visitType?: string;
+  callType?: string;
+  callOutcome?: string;
+  productsDiscussed?: string;
+  issuesDiscussed?: string;
+  feedback?: string;
+  competitorInfo?: string;
+  nextActionPlan?: string;
+  presentationTimeSeconds?: number;
+  visualsShown?: string;
+  giftsGiven?: string;
+  isOrderBooked: boolean;
+  orderValue?: number;
+  samples?: VisitSampleRequest[];
+  photos?: VisitPhotoRequest[];
+  offlineId?: string;
 }
 
 // Matches backend CheckInVisitDto

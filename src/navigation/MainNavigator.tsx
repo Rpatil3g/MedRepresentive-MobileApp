@@ -5,6 +5,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import {
   MainTabParamList,
   DoctorStackParamList,
+  ProductStackParamList,
   VisitStackParamList,
   DCRStackParamList,
   MoreStackParamList,
@@ -41,11 +42,15 @@ import { AttendanceScreen, AttendanceHistoryScreen } from '../screens/attendance
 // Tour Plan Screens
 import { MTPCalendarScreen, DayPlanFormScreen, MTPSummaryScreen } from '../screens/tourplan';
 
+// Product Screens
+import { ProductListScreen, ProductDetailScreen } from '../screens/products';
+
 // Auth screens used in More stack
 import ChangePasswordScreen from '../screens/auth/ChangePasswordScreen';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const DoctorStack = createStackNavigator<DoctorStackParamList>();
+const ProductStack = createStackNavigator<ProductStackParamList>();
 const VisitStack = createStackNavigator<VisitStackParamList>();
 const DCRStack = createStackNavigator<DCRStackParamList>();
 const MoreStack = createStackNavigator<MoreStackParamList>();
@@ -81,6 +86,21 @@ const DoctorStackNavigator: React.FC = () => (
       options={{ title: 'Add New Doctor' }}
     />
   </DoctorStack.Navigator>
+);
+
+const ProductStackNavigator: React.FC = () => (
+  <ProductStack.Navigator screenOptions={headerOptions}>
+    <ProductStack.Screen
+      name="ProductList"
+      component={ProductListScreen}
+      options={{ title: 'Product Catalog' }}
+    />
+    <ProductStack.Screen
+      name="ProductDetail"
+      component={ProductDetailScreen}
+      options={{ title: 'Product Details' }}
+    />
+  </ProductStack.Navigator>
 );
 
 const VisitStackNavigator: React.FC = () => (
@@ -268,12 +288,12 @@ const MainNavigator: React.FC = () => {
       />
 
       <Tab.Screen
-        name={ROUTES.DOCTORS}
-        component={DoctorStackNavigator}
+        name={ROUTES.PRODUCTS}
+        component={ProductStackNavigator}
         options={{
-          tabBarLabel: 'Doctors',
+          tabBarLabel: 'Products',
           tabBarIcon: ({ color, size }) => (
-            <MaterialCommunityIcons name="doctor" color={color} size={size} />
+            <MaterialCommunityIcons name="pill" color={color} size={size} />
           ),
         }}
       />
@@ -311,6 +331,15 @@ const MainNavigator: React.FC = () => {
       <Tab.Screen
         name={ROUTES.DCR}
         component={DCRStackNavigator}
+        options={{
+          tabBarItemStyle: { display: 'none' },
+          tabBarButton: () => null,
+        }}
+      />
+
+      <Tab.Screen
+        name={ROUTES.DOCTORS}
+        component={DoctorStackNavigator}
         options={{
           tabBarItemStyle: { display: 'none' },
           tabBarButton: () => null,

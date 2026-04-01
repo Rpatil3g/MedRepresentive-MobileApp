@@ -13,8 +13,9 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { Card, ErrorMessage, Loading } from '../../components/common';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { setDCRs } from '../../store/slices/dcrSlice';
-import { dcrApi } from '../../services/api';
+import { dcrApi, visitApi } from '../../services/api';
 import { DailyCallReport } from '../../types/dcr.types';
+import { showAlert } from '../../utils/helpers';
 import { DCRStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES, ROUTES } from '../../constants';
 import { formatDate } from '../../utils/dateUtils';
@@ -62,8 +63,23 @@ const DCRListScreen: React.FC = () => {
     navigation.navigate(ROUTES.DCR_DETAIL, { dcrId: dcr.id });
   };
 
-  const handleCreateDCR = () => {
-    navigation.navigate(ROUTES.CREATE_DCR, {});
+  const handleCreateDCR = async () => {
+    try {
+      const visits = await visitApi.getTodayVisits();
+      const completed = visits.filter(
+        v => v.status === 'Checked-Out' || v.status === 'Completed'
+      );
+      if (completed.length === 0) {
+        showAlert(
+          'No Completed Visits',
+          'You need to complete at least one visit before submitting your DCR for the day.'
+        );
+        return;
+      }
+      navigation.navigate(ROUTES.CREATE_DCR, {});
+    } catch {
+      navigation.navigate(ROUTES.CREATE_DCR, {});
+    }
   };
 
   const handleCalendar = () => {
