@@ -34,24 +34,12 @@ axiosInstance.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
       
-      const fullUrl = axiosInstance.getUri(config);
-
-      console.log('API Request:', {
-        method: config.method?.toUpperCase(),
-        baseURL: config.baseURL,
-        url: config.url,
-        fullUrl,
-        params: config.params,
-      });
-      
       return config;
     } catch (error) {
-      console.error('Request interceptor error:', error);
       return config;
     }
   },
   (error) => {
-    console.error('Request error:', error);
     return Promise.reject(error);
   }
 );
@@ -59,20 +47,10 @@ axiosInstance.interceptors.request.use(
 // Response Interceptor
 axiosInstance.interceptors.response.use(
   (response) => {
-    console.log('API Response:', {
-      status: response.status,
-      url: response.config.url,
-    });
     return response;
   },
   async (error: AxiosError) => {
     const originalRequest: any = error.config;
-    
-    console.error('Response error:', {
-      status: error.response?.status,
-      url: originalRequest?.url,
-      message: error.message,
-    });
     
     // Handle 401 Unauthorized - Token expired
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -101,8 +79,6 @@ axiosInstance.interceptors.response.use(
           return axiosInstance(originalRequest);
         }
       } catch (refreshError) {
-        console.error('Token refresh failed:', refreshError);
-
         // Clear auth data and force logout
         await storageService.clearAuthTokens();
         store.dispatch(logout());
