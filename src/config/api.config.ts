@@ -72,6 +72,9 @@ export const API_CONFIG = {
     // Lookups (admin-managed dropdown values)
     LOOKUPS: '/lookups',
 
+    // Live Tracking
+    LIVE_TRACKING_UPDATE: '/live-tracking/update',
+
     // Expenses
     EXPENSES: '/expenses',
     EXPENSES_MY_EXPENSES: '/expenses/my-expenses',

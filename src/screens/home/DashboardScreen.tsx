@@ -22,6 +22,7 @@ import { formatDate } from '../../utils/dateUtils';
 import { visitApi, attendanceApi } from '../../services/api';
 import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { useAuth } from '../../hooks/useAuth';
+import { useLocationTracker } from '../../hooks/useLocationTracker';
 import { MainTabParamList } from '../../types/navigation.types';
 import { Visit } from '../../types/visit.types';
 
@@ -59,6 +60,8 @@ const DashboardScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useLocationTracker(isPunchedIn);
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -149,14 +152,6 @@ const DashboardScreen: React.FC = () => {
     if (!hasPermission) {
       showAlert('Permission Denied', 'Location permission is required to punch in/out.');
       return;
-    }
-
-    if (Platform.OS === 'android') {
-      const isMock = await DeviceInfo.isMockLocation();
-      if (isMock) {
-        showAlert('Mock Location Detected', 'Fake GPS detected. Attendance cannot be recorded.');
-        return;
-      }
     }
 
     setPunchLoading(true);
