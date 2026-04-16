@@ -38,7 +38,27 @@ interface PartyOption {
   id: string;
   name: string;
   details: string;
+  geoLocation?: { latitude: number; longitude: number };
 }
+
+// Geo-fence threshold — warn the MR if they are farther than this from the clinic
+const GEO_WARN_THRESHOLD_M = 500;
+
+/** Haversine formula — returns distance between two coordinates in metres */
+const haversineDistance = (
+  lat1: number, lon1: number,
+  lat2: number, lon2: number,
+): number => {
+  const R = 6371000;
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(Δφ / 2) ** 2 +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 // Fallback values used while the API response is loading or if it fails.
 // These are NOT the source of truth — Master.LookupValues table is.
@@ -122,6 +142,7 @@ const VisitCheckInScreen: React.FC = () => {
   // ── Location state
   const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
 
   // ── Loading
   const [saving, setSaving] = useState(false);
@@ -147,6 +168,21 @@ const VisitCheckInScreen: React.FC = () => {
   const [productResults, setProductResults] = useState<Product[]>([]);
   const [showProductDrop, setShowProductDrop] = useState(false);
   const [searchingProduct, setSearchingProduct] = useState(false);
+
+  // ── Geo-fence: recompute distance whenever MR location or selected party changes
+  useEffect(() => {
+    if (location && selectedParty?.geoLocation) {
+      const d = haversineDistance(
+        location.latitude,
+        location.longitude,
+        selectedParty.geoLocation.latitude,
+        selectedParty.geoLocation.longitude,
+      );
+      setDistanceMeters(d);
+    } else {
+      setDistanceMeters(null);
+    }
+  }, [location, selectedParty]);
 
   // ── Init
   useEffect(() => {
@@ -187,6 +223,7 @@ const VisitCheckInScreen: React.FC = () => {
         id: d.id,
         name: d.doctorName,
         details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
+        geoLocation: d.geoLocation,
       });
     } catch (e) {
       console.error('loadPreselectedDoctor:', e);
@@ -219,6 +256,7 @@ const VisitCheckInScreen: React.FC = () => {
           id: d.id,
           name: d.doctorName,
           details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
+          geoLocation: d.geoLocation,
         })));
       }
     } catch (e) {
@@ -392,6 +430,20 @@ const VisitCheckInScreen: React.FC = () => {
               <Text style={styles.partyDetailsText}>{selectedParty.details}</Text>
             </View>
           ) : null}
+
+          {/* ── Geo-fence Warning ── */}
+          {distanceMeters !== null && distanceMeters > GEO_WARN_THRESHOLD_M && (
+            <View style={styles.distanceWarning}>
+              <MaterialCommunityIcons name="map-marker-alert" size={18} color="#92400e" />
+              <Text style={styles.distanceWarningText}>
+                You are{' '}
+                {distanceMeters >= 1000
+                  ? `${(distanceMeters / 1000).toFixed(1)} km`
+                  : `${Math.round(distanceMeters)} m`}{' '}
+                away from this {visitType === 'Doctor / Clinic' ? 'clinic' : 'pharmacy'}. Visit will still be logged.
+              </Text>
+            </View>
+          )}
 
           {/* ── Call Type + Visit Status (2-col) ── */}
           <View style={styles.twoCol}>
@@ -778,6 +830,26 @@ const styles = StyleSheet.create({
   partyDetailsText: {
     fontSize: SIZES.fontSM,
     color: COLORS.textSecondary,
+  },
+
+  // Geo-fence distance warning
+  distanceWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#fffbeb',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+    borderRadius: SIZES.radiusSM,
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: 10,
+    marginBottom: SIZES.paddingMD,
+    gap: 8,
+  },
+  distanceWarningText: {
+    flex: 1,
+    fontSize: SIZES.fontSM,
+    color: '#92400e',
+    lineHeight: 18,
   },
 
   // Product search dropdown
