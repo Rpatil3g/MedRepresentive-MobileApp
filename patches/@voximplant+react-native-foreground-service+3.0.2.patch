@@ -1,0 +1,20 @@
+diff --git a/node_modules/@voximplant/react-native-foreground-service/android/build.gradle b/node_modules/@voximplant/react-native-foreground-service/android/build.gradle
+index 7f9022f..7a6a290 100644
+--- a/node_modules/@voximplant/react-native-foreground-service/android/build.gradle
++++ b/node_modules/@voximplant/react-native-foreground-service/android/build.gradle
+@@ -6,12 +6,11 @@ def safeExtGet(prop, fallback) {
+ }
+ 
+ android {
+-    compileSdkVersion 28
+-    buildToolsVersion '28.0.3'
++    compileSdkVersion safeExtGet('compileSdkVersion', 36)
+ 
+     defaultConfig {
+-        minSdkVersion 16
+-        targetSdkVersion 28
++        minSdkVersion safeExtGet('minSdkVersion', 24)
++        targetSdkVersion safeExtGet('targetSdkVersion', 36)
+         versionCode 1
+         versionName "1.0"
+     }

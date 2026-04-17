@@ -20,6 +20,10 @@ export const API_CONFIG = {
     DOCTORS_NEARBY: '/doctors/nearby',
     DOCTORS_BY_TERRITORY: '/doctors/by-territory',
 
+    // Chemists
+    CHEMISTS: '/chemists',
+    CHEMISTS_SEARCH: '/chemists/search',
+
     // Territories
     TERRITORIES: '/territories',
     TERRITORIES_MY_TERRITORIES: '/territories/my-territories',

@@ -1,5 +1,6 @@
 export { default as authApi } from './authApi';
 export { default as doctorApi } from './doctorApi';
+export { default as chemistApi } from './chemistApi';
 export { default as visitApi } from './visitApi';
 export { default as dcrApi } from './dcrApi';
 export { default as taskApi } from './taskApi';

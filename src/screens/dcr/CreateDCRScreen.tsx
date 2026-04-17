@@ -12,9 +12,9 @@ import {
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppDispatch } from '../../store/hooks';
-import { addDCR } from '../../store/slices/dcrSlice';
+import { addDCR, updateDCR as updateDCRAction } from '../../store/slices/dcrSlice';
 import { dcrApi, visitApi, attendanceApi, expenseApi } from '../../services/api';
-import { CreateDCRRequest } from '../../types/dcr.types';
+import { CreateDCRRequest, DailyCallReport } from '../../types/dcr.types';
 import { Visit } from '../../types/visit.types';
 import { AttendanceRecord } from '../../types/attendance.types';
 import { DCRStackParamList } from '../../types/navigation.types';
@@ -36,6 +36,7 @@ const CreateDCRScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [existingDraft, setExistingDraft] = useState<DailyCallReport | null>(null);
 
   // Form fields
   const [endLocation, setEndLocation] = useState('');
@@ -46,12 +47,23 @@ const CreateDCRScreen: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [todayVisits, todayAttendance] = await Promise.all([
+      const [todayVisits, todayAttendance, existingDraft] = await Promise.all([
         visitApi.getTodayVisits(),
         attendanceApi.getTodayAttendance(),
+        dcrApi.getDCRByDate(reportDate),
       ]);
       setVisits(todayVisits);
       setAttendance(todayAttendance);
+      setExistingDraft(existingDraft);
+
+      // Restore draft field values so the form is never blank on reopen
+      if (existingDraft && existingDraft.status === 'Draft') {
+        if (existingDraft.endLocation) setEndLocation(existingDraft.endLocation);
+        if (existingDraft.remarks)     setRemarks(existingDraft.remarks);
+        if (existingDraft.travelExpense != null) setTravelExpense(String(existingDraft.travelExpense));
+        if (existingDraft.daExpense    != null) setDaExpense(String(existingDraft.daExpense));
+        if (existingDraft.otherExpense != null) setOtherExpense(String(existingDraft.otherExpense));
+      }
     } catch (error) {
       console.error('Fetch data error:', error);
     }
@@ -103,14 +115,33 @@ const CreateDCRScreen: React.FC = () => {
         startLocation: attendance?.punchInAddress || undefined,
         endLocation: endLocation.trim() || undefined,
         remarks: remarks.trim() || undefined,
+        travelExpense: travel > 0 ? travel : undefined,
+        daExpense:     da     > 0 ? da     : undefined,
+        otherExpense:  other  > 0 ? other  : undefined,
       };
 
-      const newDCR = await dcrApi.createDCR(dcrData);
-      dispatch(addDCR(newDCR));
+      // Guard against non-editable states (uses value already fetched on screen load)
+      if (existingDraft) {
+        if (existingDraft.status === 'Submitted') {
+          showAlert('Already Submitted', 'The DCR for today has already been submitted for approval.');
+          return;
+        }
+        if (existingDraft.status === 'Approved') {
+          showAlert('Already Approved', 'The DCR for today has already been approved.');
+          return;
+        }
+      }
+
+      // Create or update depending on whether a draft already exists
+      const savedDCR = existingDraft
+        ? await dcrApi.updateDCR(existingDraft.id, dcrData)
+        : await dcrApi.createDCR(dcrData);
+
+      dispatch(existingDraft ? updateDCRAction(savedDCR) : addDCR(savedDCR));
 
       if (!isDraft) {
         // Submit for approval
-        await dcrApi.submitDCR(newDCR.id);
+        await dcrApi.submitDCR(savedDCR.id);
 
         // Create expense entries (best-effort, non-blocking)
         const expenseDate = reportDate;
@@ -422,7 +453,7 @@ const CreateDCRScreen: React.FC = () => {
 
       </ScrollView>
 
-      <Loading visible={submitting} message="Submitting DCR..." />
+      <Loading visible={submitting} message="Please wait..." />
     </KeyboardAvoidingView>
   );
 };

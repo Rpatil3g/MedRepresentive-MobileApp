@@ -13,6 +13,9 @@ export interface DailyCallReport {
   startLocation?: string;
   endLocation?: string;
   remarks?: string;
+  travelExpense?: number;
+  daExpense?: number;
+  otherExpense?: number;
   status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected';
   submittedAt?: string;
   approvedBy?: string;
@@ -34,6 +37,9 @@ export interface CreateDCRRequest {
   startLocation?: string;
   endLocation?: string;
   remarks?: string;
+  travelExpense?: number;
+  daExpense?: number;
+  otherExpense?: number;
 }
 
 export interface DCRListRequest {

@@ -19,8 +19,9 @@ import { format } from 'date-fns';
 import { Button, Loading } from '../../components/common';
 import { useAppDispatch } from '../../store/hooks';
 import { addVisit } from '../../store/slices/visitSlice';
-import { visitApi, doctorApi, productApi, lookupApi } from '../../services/api';
+import { visitApi, doctorApi, chemistApi, productApi, lookupApi } from '../../services/api';
 import { Doctor } from '../../types/doctor.types';
+import { Chemist } from '../../types/chemist.types';
 import { Product } from '../../types/product.types';
 import { VisitStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES } from '../../constants';
@@ -257,6 +258,17 @@ const VisitCheckInScreen: React.FC = () => {
           name: d.doctorName,
           details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
           geoLocation: d.geoLocation,
+        })));
+      } else {
+        const res = await chemistApi.searchChemists(query);
+        setPartyResults((res || []).map((c: Chemist) => ({
+          id: c.id,
+          name: c.pharmacyName || c.chemistName,
+          details: [c.chemistName, c.category, c.address, c.city].filter(Boolean).join(' • '),
+          geoLocation:
+            c.latitude !== undefined && c.longitude !== undefined
+              ? { latitude: c.latitude, longitude: c.longitude }
+              : undefined,
         })));
       }
     } catch (e) {
