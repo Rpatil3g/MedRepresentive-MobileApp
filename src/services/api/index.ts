@@ -11,3 +11,5 @@ export { default as productApi } from './productApi';
 export { default as lookupApi } from './lookupApi';
 export { default as expenseApi } from './expenseApi';
 export { default as liveTrackingApi } from './liveTrackingApi';
+export { default as storageApi } from './storageApi';
+export { default as stockistApi } from './stockistApi';

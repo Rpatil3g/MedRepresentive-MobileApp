@@ -78,6 +78,10 @@ const visitSlice = createSlice({
     setLoading: (state, action: PayloadAction<boolean>) => {
       state.loading = action.payload;
     },
+    removeVisit: (state, action: PayloadAction<string>) => {
+      state.visits = state.visits.filter(v => v.id !== action.payload);
+      state.todayVisits = state.todayVisits.filter(v => v.id !== action.payload);
+    },
     setError: (state, action: PayloadAction<string | null>) => {
       state.error = action.payload;
     },
@@ -89,6 +93,7 @@ export const {
   setTodayVisits,
   addVisit,
   updateVisit,
+  removeVisit,
   setActiveVisit,
   setSelectedVisit,
   addOfflineVisit,

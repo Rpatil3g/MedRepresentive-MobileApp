@@ -24,6 +24,9 @@ export const API_CONFIG = {
     CHEMISTS: '/chemists',
     CHEMISTS_SEARCH: '/chemists/search',
 
+    // Stockists
+    STOCKISTS: '/stockists',
+
     // Territories
     TERRITORIES: '/territories',
     TERRITORIES_MY_TERRITORIES: '/territories/my-territories',
@@ -75,6 +78,9 @@ export const API_CONFIG = {
 
     // Lookups (admin-managed dropdown values)
     LOOKUPS: '/lookups',
+
+    // Storage (file upload)
+    STORAGE_UPLOAD: '/storage/upload',
 
     // Live Tracking
     LIVE_TRACKING_UPDATE: '/live-tracking/update',

@@ -8,7 +8,9 @@ import {
   Platform,
   TouchableOpacity,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
+import Geolocation from 'react-native-geolocation-service';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { useAppDispatch } from '../../store/hooks';
@@ -20,7 +22,7 @@ import { AttendanceRecord } from '../../types/attendance.types';
 import { DCRStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES } from '../../constants';
 import { formatDate, formatTime, getTodayDate } from '../../utils/dateUtils';
-import { showAlert } from '../../utils/helpers';
+import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { Loading } from '../../components/common';
 
 type CreateDCRRouteProp = RouteProp<DCRStackParamList, 'CreateDCR'>;
@@ -40,6 +42,7 @@ const CreateDCRScreen: React.FC = () => {
 
   // Form fields
   const [endLocation, setEndLocation] = useState('');
+  const [locating, setLocating] = useState(false);
   const [remarks, setRemarks] = useState('');
   const [travelExpense, setTravelExpense] = useState('');
   const [daExpense, setDaExpense] = useState('');
@@ -47,17 +50,22 @@ const CreateDCRScreen: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const [todayVisits, todayAttendance, existingDraft] = await Promise.all([
-        visitApi.getTodayVisits(),
-        attendanceApi.getTodayAttendance(),
+      const isToday = reportDate === getTodayDate();
+      const [visitsResponse, fetchedAttendance, existingDraft] = await Promise.all([
+        isToday
+          ? visitApi.getTodayVisits()
+          : visitApi.getVisits({ fromDate: reportDate, toDate: `${reportDate.split('T')[0]}T23:59:59` })
+              .then(r => (Array.isArray(r) ? r : r.items ?? [])),
+        isToday
+          ? attendanceApi.getTodayAttendance()
+          : attendanceApi.getAttendanceByDate(reportDate).catch(() => null),
         dcrApi.getDCRByDate(reportDate),
       ]);
-      setVisits(todayVisits);
-      setAttendance(todayAttendance);
+      setVisits(visitsResponse as Visit[]);
+      setAttendance(fetchedAttendance);
       setExistingDraft(existingDraft);
 
-      // Restore draft field values so the form is never blank on reopen
-      if (existingDraft && existingDraft.status === 'Draft') {
+      if (existingDraft) {
         if (existingDraft.endLocation) setEndLocation(existingDraft.endLocation);
         if (existingDraft.remarks)     setRemarks(existingDraft.remarks);
         if (existingDraft.travelExpense != null) setTravelExpense(String(existingDraft.travelExpense));
@@ -82,9 +90,19 @@ const CreateDCRScreen: React.FC = () => {
   const doctorsMet = visits.filter(
     v => v.visitType === 'Doctor' && (v.status === 'Checked-Out' || v.status === 'Completed')
   );
-  const chemistVisits = visits.filter(v => v.visitType === 'Chemist');
+  const chemistVisitsList = visits.filter(v => v.visitType === 'Chemist');
   const totalPOB = completedVisits.reduce((sum, v) => sum + (v.orderValue ?? 0), 0);
   const totalSamples = completedVisits.reduce((sum, v) => sum + (v.samples?.length ?? 0), 0);
+
+  // For existing DCRs (rejected / re-opened), use stored counts — live visits
+  // only reflect today and won't match a past report date.
+  const effectiveTotalVisits   = existingDraft ? existingDraft.totalVisits   : visits.length;
+  const effectiveDoctorVisits  = existingDraft ? existingDraft.doctorVisits  : doctorsMet.length;
+  const effectiveChemistVisits = existingDraft ? existingDraft.chemistVisits : chemistVisitsList.length;
+
+  // ── Read-only guard ───────────────────────────────────────────────────────
+  const isReadOnly =
+    existingDraft?.status === 'Submitted' || existingDraft?.status === 'Approved';
 
   // ── Expense total ─────────────────────────────────────────────────────────
   const travel = parseFloat(travelExpense) || 0;
@@ -92,9 +110,36 @@ const CreateDCRScreen: React.FC = () => {
   const other = parseFloat(otherExpense) || 0;
   const totalExpense = travel + da + other;
 
-  const handleLocate = () => {
-    // TODO: integrate Geolocation for real GPS address
-    setEndLocation('Current Location');
+  const handleLocate = async () => {
+    const ok = await requestLocationPermission();
+    if (!ok) {
+      showAlert('Permission Denied', 'Location permission is required to fetch your position.');
+      return;
+    }
+    setLocating(true);
+    Geolocation.getCurrentPosition(
+      async pos => {
+        const { latitude, longitude } = pos.coords;
+        let address = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } },
+          );
+          const data = await res.json();
+          if (data.display_name) address = data.display_name as string;
+        } catch {
+          // fallback to raw coordinates
+        }
+        setEndLocation(address);
+        setLocating(false);
+      },
+      () => {
+        showAlert('Location Error', 'Could not fetch location. Please try again.');
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+    );
   };
 
   const handleSubmit = async (isDraft: boolean) => {
@@ -109,9 +154,9 @@ const CreateDCRScreen: React.FC = () => {
       const dcrData: CreateDCRRequest = {
         reportDate,
         workType: 'Field Visit',
-        totalVisits: visits.length,
-        doctorVisits: doctorsMet.length,
-        chemistVisits: chemistVisits.length,
+        totalVisits: effectiveTotalVisits,
+        doctorVisits: effectiveDoctorVisits,
+        chemistVisits: effectiveChemistVisits,
         startLocation: attendance?.punchInAddress || undefined,
         endLocation: endLocation.trim() || undefined,
         remarks: remarks.trim() || undefined,
@@ -205,6 +250,29 @@ const CreateDCRScreen: React.FC = () => {
           <Text style={styles.dateText}>{formatDate(reportDate, 'EEEE, dd MMMM yyyy')}</Text>
         </View>
 
+        {/* ── Status Badge (read-only states) ─────────────────────────────── */}
+        {isReadOnly && (
+          <View style={[
+            styles.statusBanner,
+            existingDraft?.status === 'Approved' ? styles.statusBannerApproved : styles.statusBannerSubmitted,
+          ]}>
+            <MaterialCommunityIcons
+              name={existingDraft?.status === 'Approved' ? 'check-decagram' : 'clock-check-outline'}
+              size={20}
+              color={existingDraft?.status === 'Approved' ? COLORS.success : '#f59e0b'}
+            />
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={[
+                styles.statusBannerTitle,
+                existingDraft?.status === 'Approved' && { color: COLORS.success },
+              ]}>
+                {existingDraft?.status === 'Approved' ? 'DCR Approved' : 'DCR Submitted for Approval'}
+              </Text>
+              <Text style={styles.statusBannerSub}>This report is locked and cannot be edited.</Text>
+            </View>
+          </View>
+        )}
+
         {/* ── SECTION 1: Shift Details ─────────────────────────────────────── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Shift Details</Text>
@@ -232,11 +300,9 @@ const CreateDCRScreen: React.FC = () => {
             <Text style={styles.fieldLabel}>Start Location</Text>
             <View style={styles.iconInputRow}>
               <MaterialCommunityIcons name="crosshairs-gps" size={SIZES.iconSM} color={COLORS.secondary} style={styles.inputIcon} />
-              <TextInput
-                style={[styles.fieldInput, styles.readonlyInput]}
-                value={attendance?.punchInAddress || '—'}
-                editable={false}
-              />
+              <Text style={[styles.fieldInput, styles.readonlyInput]} numberOfLines={1} ellipsizeMode="tail">
+                {attendance?.punchInAddress || existingDraft?.startLocation || '—'}
+              </Text>
             </View>
           </View>
 
@@ -244,16 +310,28 @@ const CreateDCRScreen: React.FC = () => {
             <Text style={styles.fieldLabel}>End Location</Text>
             <View style={styles.iconInputRow}>
               <MaterialCommunityIcons name="map-marker-outline" size={SIZES.iconSM} color={COLORS.secondary} style={styles.inputIcon} />
-              <TextInput
-                style={styles.fieldInput}
-                placeholder="Tap to fetch GPS location"
-                placeholderTextColor={COLORS.textDisabled}
-                value={endLocation}
-                onChangeText={setEndLocation}
-              />
-              <TouchableOpacity style={styles.locateBtn} onPress={handleLocate}>
-                <Text style={styles.locateBtnText}>Locate</Text>
-              </TouchableOpacity>
+              {locating ? (
+                <>
+                  <ActivityIndicator size="small" color={COLORS.primary} style={{ marginRight: 8 }} />
+                  <Text style={[styles.fieldInput, { color: COLORS.textSecondary, flex: 1 }]}>
+                    Fetching location...
+                  </Text>
+                </>
+              ) : (
+                <Text
+                  style={[styles.fieldInput, !endLocation && { color: COLORS.textDisabled }, isReadOnly && styles.readonlyInput, { flex: 1 }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                  onPress={!isReadOnly ? handleLocate : undefined}
+                >
+                  {endLocation || 'Tap to fetch GPS location'}
+                </Text>
+              )}
+              {!isReadOnly && !locating && (
+                <TouchableOpacity style={styles.locateBtn} onPress={handleLocate}>
+                  <Text style={styles.locateBtnText}>{endLocation ? 'Re-locate' : 'Locate'}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         </View>
@@ -273,11 +351,11 @@ const CreateDCRScreen: React.FC = () => {
               <Text style={styles.metricLbl}>Planned Calls</Text>
             </View>
             <View style={styles.metricBox}>
-              <Text style={[styles.metricVal, { color: COLORS.success }]}>{visits.length}</Text>
+              <Text style={[styles.metricVal, { color: COLORS.success }]}>{effectiveTotalVisits}</Text>
               <Text style={styles.metricLbl}>Actual Calls</Text>
             </View>
             <View style={styles.metricBox}>
-              <Text style={styles.metricVal}>{doctorsMet.length}</Text>
+              <Text style={styles.metricVal}>{effectiveDoctorVisits}</Text>
               <Text style={styles.metricLbl}>Doctor (Met)</Text>
             </View>
             <View style={styles.metricBox}>
@@ -285,7 +363,7 @@ const CreateDCRScreen: React.FC = () => {
               <Text style={styles.metricLbl}>Doctor (Missed)</Text>
             </View>
             <View style={styles.metricBox}>
-              <Text style={styles.metricVal}>{chemistVisits.length}</Text>
+              <Text style={styles.metricVal}>{effectiveChemistVisits}</Text>
               <Text style={styles.metricLbl}>Chemists</Text>
             </View>
             <View style={styles.metricBox}>
@@ -331,6 +409,7 @@ const CreateDCRScreen: React.FC = () => {
                 keyboardType="decimal-pad"
                 placeholder="0"
                 placeholderTextColor={COLORS.textDisabled}
+                editable={!isReadOnly}
               />
             </View>
           </View>
@@ -346,6 +425,7 @@ const CreateDCRScreen: React.FC = () => {
                 keyboardType="decimal-pad"
                 placeholder="0"
                 placeholderTextColor={COLORS.textDisabled}
+                editable={!isReadOnly}
               />
             </View>
           </View>
@@ -361,6 +441,7 @@ const CreateDCRScreen: React.FC = () => {
                 keyboardType="decimal-pad"
                 placeholder="0"
                 placeholderTextColor={COLORS.textDisabled}
+                editable={!isReadOnly}
               />
             </View>
           </View>
@@ -383,7 +464,7 @@ const CreateDCRScreen: React.FC = () => {
             Summarize what happened today, key discussions, or any issues.
           </Text>
           <TextInput
-            style={styles.remarksInput}
+            style={[styles.remarksInput, isReadOnly && styles.readonlyInput]}
             placeholder="E.g., Had a great discussion with Dr. Gupta regarding the new CardioMax study..."
             placeholderTextColor={COLORS.textDisabled}
             multiline
@@ -391,6 +472,7 @@ const CreateDCRScreen: React.FC = () => {
             value={remarks}
             onChangeText={setRemarks}
             textAlignVertical="top"
+            editable={!isReadOnly}
           />
         </View>
 
@@ -407,10 +489,15 @@ const CreateDCRScreen: React.FC = () => {
         </View>
 
         {visits.map(visit => (
-          <View key={visit.id} style={styles.visitCard}>
+          <TouchableOpacity
+            key={visit.id}
+            style={styles.visitCard}
+            activeOpacity={0.7}
+            onPress={() => (navigation as any).navigate('VisitEdit', { visitId: visit.id })}
+          >
             <View style={styles.visitInfo}>
               <Text style={styles.visitName}>
-                {visit.doctorName || visit.chemistShopName || 'Unknown'}
+                {visit.doctorName || visit.chemistShopName || visit.stockistCompanyName || visit.stockistName || 'Unknown'}
               </Text>
               <Text style={styles.visitMeta}>
                 {[
@@ -424,8 +511,8 @@ const CreateDCRScreen: React.FC = () => {
                   .join(' • ')}
               </Text>
             </View>
-            <MaterialCommunityIcons name="pencil-outline" size={SIZES.iconSM} color={COLORS.secondary} />
-          </View>
+            <MaterialCommunityIcons name="pencil-outline" size={SIZES.iconSM} color={COLORS.primary} />
+          </TouchableOpacity>
         ))}
 
         {visits.length === 0 && (
@@ -435,21 +522,33 @@ const CreateDCRScreen: React.FC = () => {
         )}
 
         {/* ── Action Buttons ────────────────────────────────────────────────── */}
-        <TouchableOpacity
-          style={[styles.submitBtn, submitting && styles.btnDisabled]}
-          onPress={() => handleSubmit(false)}
-          disabled={submitting}
-        >
-          <Text style={styles.submitBtnText}>Submit Final DCR</Text>
-        </TouchableOpacity>
+        {isReadOnly ? (
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <MaterialCommunityIcons name="arrow-left" size={18} color={COLORS.primary} />
+            <Text style={styles.backBtnText}>Back to Dashboard</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[styles.submitBtn, submitting && styles.btnDisabled]}
+              onPress={() => handleSubmit(false)}
+              disabled={submitting}
+            >
+              <Text style={styles.submitBtnText}>Submit Final DCR</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.draftBtn, submitting && styles.btnDisabled]}
-          onPress={() => handleSubmit(true)}
-          disabled={submitting}
-        >
-          <Text style={styles.draftBtnText}>Save as Draft</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.draftBtn, submitting && styles.btnDisabled]}
+              onPress={() => handleSubmit(true)}
+              disabled={submitting}
+            >
+              <Text style={styles.draftBtnText}>Save as Draft</Text>
+            </TouchableOpacity>
+          </>
+        )}
 
       </ScrollView>
 
@@ -804,6 +903,51 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.5,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderRadius: SIZES.radiusMD,
+    paddingVertical: SIZES.paddingMD - 2,
+    marginTop: SIZES.paddingMD,
+    gap: 6,
+  },
+  backBtnText: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+
+  // ── Status banner ─────────────────────────────────────────────────────────
+  statusBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: SIZES.radiusMD,
+    borderWidth: 1,
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: SIZES.paddingMD,
+    marginBottom: SIZES.paddingMD,
+  },
+  statusBannerSubmitted: {
+    backgroundColor: '#fffbeb',
+    borderColor: '#f59e0b',
+  },
+  statusBannerApproved: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#a7f3d0',
+  },
+  statusBannerTitle: {
+    fontSize: SIZES.fontSM,
+    fontWeight: '700',
+    color: '#b45309',
+    marginBottom: 2,
+  },
+  statusBannerSub: {
+    fontSize: SIZES.fontXS,
+    color: COLORS.textSecondary,
   },
 });
 

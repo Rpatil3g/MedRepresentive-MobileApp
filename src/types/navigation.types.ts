@@ -55,17 +55,17 @@ export type DoctorStackParamList = {
 // Visit Stack
 export type VisitStackParamList = {
   VisitList: undefined;
-  VisitCheckIn: { doctorId?: string; chemistId?: string };
+  LogVisit: { doctorId?: string; chemistId?: string };
   VisitDetail: { visitId: string };
-  VisitCheckOut: { visitId: string };
+  VisitEdit: { visitId: string };
 };
 
 // DCR Stack
 export type DCRStackParamList = {
   DCRList: undefined;
   CreateDCR: { date?: string };
-  DCRDetail: { dcrId: string };
   DCRCalendar: undefined;
+  VisitEdit: { visitId: string };
 };
 
 // Task Stack

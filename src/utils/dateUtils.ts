@@ -1,25 +1,29 @@
 import { format, parseISO, isToday, isYesterday, differenceInDays } from 'date-fns';
 
+// If the string has no timezone suffix, treat it as UTC so device local time is shown
+const toLocalDate = (date: string | Date): Date => {
+  if (typeof date !== 'string') return date;
+  const normalized = /[Z+\-]\d*$/.test(date) ? date : date + 'Z';
+  return parseISO(normalized);
+};
+
 export const formatDate = (
   date: string | Date,
   formatStr: string = 'dd MMM yyyy'
 ): string => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
-  return format(dateObj, formatStr);
+  return format(toLocalDate(date), formatStr);
 };
 
 export const formatTime = (date: string | Date): string => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
-  return format(dateObj, 'hh:mm a');
+  return format(toLocalDate(date), 'hh:mm a');
 };
 
 export const formatDateTime = (date: string | Date): string => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
-  return format(dateObj, 'dd MMM yyyy, hh:mm a');
+  return format(toLocalDate(date), 'dd MMM yyyy, hh:mm a');
 };
 
 export const getRelativeDate = (date: string | Date): string => {
-  const dateObj = typeof date === 'string' ? parseISO(date) : date;
+  const dateObj = toLocalDate(date);
 
   if (isToday(dateObj)) {
     return 'Today';
@@ -46,4 +50,3 @@ export const getMonthYear = (date: Date = new Date()): { month: number; year: nu
     year: date.getFullYear(),
   };
 };
-

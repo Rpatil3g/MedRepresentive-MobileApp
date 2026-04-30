@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,29 +11,43 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  Alert,
+  Linking,
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Geolocation from 'react-native-geolocation-service';
 import { format } from 'date-fns';
 import { Button, Loading } from '../../components/common';
 import { useAppDispatch } from '../../store/hooks';
 import { addVisit } from '../../store/slices/visitSlice';
-import { visitApi, doctorApi, chemistApi, productApi, lookupApi } from '../../services/api';
+import { visitApi, doctorApi, chemistApi, stockistApi, productApi, lookupApi, storageApi } from '../../services/api';
 import { Doctor } from '../../types/doctor.types';
 import { Chemist } from '../../types/chemist.types';
 import { Product } from '../../types/product.types';
+import { VisitPhotoRequest } from '../../types/visit.types';
 import { VisitStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES } from '../../constants';
 import { requestLocationPermission, showAlert } from '../../utils/helpers';
 
-type VisitCheckInRouteProp = RouteProp<VisitStackParamList, 'VisitCheckIn'>;
+type LogVisitRouteProp = RouteProp<VisitStackParamList, 'LogVisit'>;
 
 interface SampleItem {
   productId: string;
   productName: string;
   quantity: number;
 }
+
+interface PhotoEntry {
+  uri: string;
+  photoType: string;
+  caption: string;
+  isFront: boolean;
+}
+
+const PHOTO_TYPES = ['WithDoctor', 'Clinic', 'ProductDisplay'];
 
 interface PartyOption {
   id: string;
@@ -42,8 +56,8 @@ interface PartyOption {
   geoLocation?: { latitude: number; longitude: number };
 }
 
-// Geo-fence threshold — warn the MR if they are farther than this from the clinic
-const GEO_WARN_THRESHOLD_M = 500;
+const GEO_WARN_THRESHOLD_M  = 500;   // yellow warning
+const GEO_BLOCK_THRESHOLD_M = 2000;  // hard block — visit cannot be submitted
 
 /** Haversine formula — returns distance between two coordinates in metres */
 const haversineDistance = (
@@ -63,7 +77,7 @@ const haversineDistance = (
 
 // Fallback values used while the API response is loading or if it fails.
 // These are NOT the source of truth — Master.LookupValues table is.
-const FALLBACK_VISIT_TYPES  = ['Doctor / Clinic', 'Chemist / Pharmacy'];
+const FALLBACK_VISIT_TYPES  = ['Doctor / Clinic', 'Chemist / Pharmacy', 'Stockist'];
 const FALLBACK_CALL_TYPES   = ['Routine', 'Follow Up', 'Campaign', 'Cold Call'];
 const FALLBACK_VISIT_OUTCOMES = ['Met', 'Not Available', 'Busy / Refused', 'On Leave'];
 
@@ -117,9 +131,9 @@ const SectionLabel: React.FC<{ label: string }> = ({ label }) => (
 
 // ─── Main Screen ─────────────────────────────────────────────────────────────
 
-const VisitCheckInScreen: React.FC = () => {
+const LogVisitScreen: React.FC = () => {
   const navigation = useNavigation();
-  const route = useRoute<VisitCheckInRouteProp>();
+  const route = useRoute<LogVisitRouteProp>();
   const dispatch = useAppDispatch();
 
   const { doctorId, chemistId } = route.params || {};
@@ -138,15 +152,29 @@ const VisitCheckInScreen: React.FC = () => {
   const [samples, setSamples] = useState<SampleItem[]>([]);
   const [isOrderBooked, setIsOrderBooked] = useState(false);
   const [orderValue, setOrderValue] = useState('');
+  const [visitDuration, setVisitDuration] = useState('');
   const [remarks, setRemarks] = useState('');
 
   // ── Location state
-  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [location, setLocation] = useState<{ latitude: number; longitude: number; address?: string } | null>(null);
   const [gettingLocation, setGettingLocation] = useState(false);
+  const [locationBlocked, setLocationBlocked] = useState<string | null>(null);
   const [distanceMeters, setDistanceMeters] = useState<number | null>(null);
 
   // ── Loading
   const [saving, setSaving] = useState(false);
+
+  // ── Photos
+  const [photos, setPhotos] = useState<PhotoEntry[]>([]);
+  const [showCamera, setShowCamera] = useState(false);
+  const [captionEditIdx, setCaptionEditIdx] = useState<number | null>(null);
+  const [captionDraft, setCaptionDraft] = useState('');
+  const [cameraFacing, setCameraFacing] = useState<'back' | 'front'>('back');
+  const cameraRef = useRef<Camera>(null);
+  const { hasPermission, requestPermission } = useCameraPermission();
+  const backDevice = useCameraDevice('back');
+  const frontDevice = useCameraDevice('front');
+  const device = cameraFacing === 'front' ? frontDevice : backDevice;
 
   // ── Picker modals
   const [showVisitTypePicker, setShowVisitTypePicker] = useState(false);
@@ -185,17 +213,42 @@ const VisitCheckInScreen: React.FC = () => {
     }
   }, [location, selectedParty]);
 
-  // ── Init
-  useEffect(() => {
-    getCurrentLocation();
-    loadLookupOptions();
-    if (doctorId) {
-      loadPreselectedDoctor(doctorId);
-    } else if (chemistId) {
-      setVisitType('Chemist / Pharmacy');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── Reset form every time the screen is focused (handles back-nav from dashboard)
+  useFocusEffect(
+    useCallback(() => {
+      setVisitDateTime(new Date());
+      setVisitType(FALLBACK_VISIT_TYPES[0]);
+      setSelectedParty(null);
+      setCallType('Routine');
+      setVisitOutcome('Met');
+      setSamples([]);
+      setIsOrderBooked(false);
+      setOrderValue('');
+      setVisitDuration('');
+      setRemarks('');
+      setPhotos([]);
+      setShowCamera(false);
+      setCaptionEditIdx(null);
+      setLocation(null);
+      setDistanceMeters(null);
+      setDateInput(format(new Date(), 'yyyy-MM-dd'));
+      setTimeInput(format(new Date(), 'HH:mm'));
+      setPartyQuery('');
+      setPartyResults([]);
+      setProductQuery('');
+      setProductResults([]);
+      setShowProductDrop(false);
+      getCurrentLocation();
+      loadLookupOptions();
+      if (doctorId) {
+        loadPreselectedDoctor(doctorId);
+      } else if (chemistId) {
+        setVisitType('Chemist / Pharmacy');
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [doctorId, chemistId]),
+  );
+
 
   const loadLookupOptions = async () => {
     try {
@@ -204,14 +257,9 @@ const VisitCheckInScreen: React.FC = () => {
         'CallType',
         'VisitOutcome',
       ]);
-      if (data.VisitType?.length)   setVisitTypes(data.VisitType);
-      if (data.CallType?.length)    setCallTypes(data.CallType);
+      if (data.VisitType?.length)    setVisitTypes(data.VisitType);
+      if (data.CallType?.length)     setCallTypes(data.CallType);
       if (data.VisitOutcome?.length) setVisitOutcomes(data.VisitOutcome);
-
-      // Ensure selected defaults exist in the new list
-      setVisitType(v => data.VisitType?.includes(v) ? v : (data.VisitType?.[0] ?? v));
-      setCallType(v => data.CallType?.includes(v) ? v : (data.CallType?.[0] ?? v));
-      setVisitOutcome(v => data.VisitOutcome?.includes(v) ? v : (data.VisitOutcome?.[0] ?? v));
     } catch {
       // Network error — fallback values already in state, no action needed
     }
@@ -234,14 +282,39 @@ const VisitCheckInScreen: React.FC = () => {
   const getCurrentLocation = async () => {
     const ok = await requestLocationPermission();
     if (!ok) return;
+    setLocationBlocked(null);
     setGettingLocation(true);
     Geolocation.getCurrentPosition(
-      pos => {
-        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+      async pos => {
+        // ── Anti-spoofing checks ─────────────────────────────────────────
+        if (pos.mocked === true) {
+          setLocationBlocked('Mock location detected. Please disable fake GPS apps and try again.');
+          setGettingLocation(false);
+          return;
+        }
+        if (pos.coords.accuracy === 0) {
+          setLocationBlocked('Location accuracy is suspicious. Please disable mock location and try again.');
+          setGettingLocation(false);
+          return;
+        }
+        // ────────────────────────────────────────────────────────────────
+        const { latitude, longitude } = pos.coords;
+        let address: string | undefined;
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } },
+          );
+          const data = await res.json();
+          if (data.display_name) address = data.display_name as string;
+        } catch {
+          // address stays undefined — coordinates shown as fallback
+        }
+        setLocation({ latitude, longitude, address });
         setGettingLocation(false);
       },
       () => setGettingLocation(false),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
     );
   };
 
@@ -258,6 +331,17 @@ const VisitCheckInScreen: React.FC = () => {
           name: d.doctorName,
           details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
           geoLocation: d.geoLocation,
+        })));
+      } else if (visitType === 'Stockist') {
+        const res = await stockistApi.searchStockists(query);
+        setPartyResults((res || []).map(s => ({
+          id: s.id,
+          name: s.stockistName,
+          details: [s.companyName, s.city, s.contactPerson].filter(Boolean).join(' • '),
+          geoLocation:
+            s.latitude !== undefined && s.longitude !== undefined
+              ? { latitude: s.latitude!, longitude: s.longitude! }
+              : undefined,
         })));
       } else {
         const res = await chemistApi.searchChemists(query);
@@ -319,8 +403,69 @@ const VisitCheckInScreen: React.FC = () => {
     setShowDateModal(false);
   };
 
+  // ── Photo handlers
+  const handleOpenCamera = async () => {
+    if (!hasPermission) {
+      const granted = await requestPermission();
+      if (!granted) {
+        Alert.alert(
+          'Camera Permission Required',
+          'Allow camera access to capture visit photos. Tap "Open Settings" to grant it.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+        return;
+      }
+    }
+    if (!device) {
+      showAlert('Camera', 'No camera device found on this device.');
+      return;
+    }
+    setShowCamera(true);
+  };
+
+  const handleCapture = async () => {
+    try {
+      // Front cameras have no flash — using 'auto' on them throws in Vision Camera
+      const flash = cameraFacing === 'back' ? 'auto' : 'off';
+      const photo = await cameraRef.current?.takePhoto({ flash });
+      if (photo) {
+        const uri = Platform.OS === 'android' ? `file://${photo.path}` : photo.path;
+        setPhotos(prev => [...prev, { uri, photoType: 'WithDoctor', caption: '', isFront: cameraFacing === 'front' }]);
+        setShowCamera(false);
+      }
+    } catch (err) {
+      console.error('Capture error:', err);
+      showAlert('Capture Error', 'Failed to capture photo. Please try again.');
+    }
+  };
+
+  const updatePhotoType = (index: number, photoType: string) =>
+    setPhotos(prev => prev.map((p, i) => (i === index ? { ...p, photoType } : p)));
+
+  const removePhoto = (index: number) =>
+    setPhotos(prev => prev.filter((_, i) => i !== index));
+
+  const openCaptionEdit = (index: number) => {
+    setCaptionDraft(photos[index].caption);
+    setCaptionEditIdx(index);
+  };
+
+  const saveCaptionEdit = () => {
+    if (captionEditIdx !== null) {
+      setPhotos(prev => prev.map((p, i) => (i === captionEditIdx ? { ...p, caption: captionDraft } : p)));
+    }
+    setCaptionEditIdx(null);
+  };
+
   // ── Save
   const handleSave = async () => {
+    if (locationBlocked) {
+      showAlert('Location Blocked', locationBlocked);
+      return;
+    }
     if (!location) {
       showAlert('Location Required', 'Please wait for location to be captured');
       return;
@@ -329,23 +474,53 @@ const VisitCheckInScreen: React.FC = () => {
       showAlert('Party Required', 'Please select a doctor or chemist');
       return;
     }
+    if (distanceMeters !== null && distanceMeters > GEO_BLOCK_THRESHOLD_M) {
+      showAlert(
+        'Too Far Away',
+        `You are ${distanceMeters >= 1000 ? `${(distanceMeters / 1000).toFixed(1)} km` : `${Math.round(distanceMeters)} m`} away from this ${visitType === 'Doctor / Clinic' ? 'clinic' : visitType === 'Stockist' ? 'stockist' : 'pharmacy'}. You must be within 2 km to log a visit.`,
+      );
+      return;
+    }
     setSaving(true);
     try {
+      // Upload photos first — if any fail, abort and do not save the visit
+      const uploadedPhotos: VisitPhotoRequest[] = [];
+      for (const photo of photos) {
+        try {
+          const filename = `visit_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+          const url = await storageApi.uploadFile(photo.uri, 'image/jpeg', filename, 'visit-photos');
+          uploadedPhotos.push({
+            photoUrl: url,
+            photoType: photo.photoType || undefined,
+            caption: photo.caption || undefined,
+          });
+        } catch (uploadErr) {
+          console.error('Photo upload failed:', uploadErr);
+          showAlert('Photo Upload Failed', 'Could not upload one or more photos. Please check your connection and try again.');
+          setSaving(false);
+          return;
+        }
+      }
+
       const isDoctorType = visitType === 'Doctor / Clinic';
+      const isStockistType = visitType === 'Stockist';
       const visit = await visitApi.createVisit({
         doctorId: isDoctorType ? selectedParty.id : undefined,
-        chemistId: !isDoctorType ? selectedParty.id : undefined,
+        chemistId: !isDoctorType && !isStockistType ? selectedParty.id : undefined,
+        stockistId: isStockistType ? selectedParty.id : undefined,
         visitDateTime: visitDateTime.toISOString(),
         latitude: location.latitude,
         longitude: location.longitude,
         isPlannedVisit: false,
-        visitType: isDoctorType ? 'Doctor' : 'Chemist',
+        visitDurationMinutes: visitDuration ? parseInt(visitDuration, 10) : undefined,
+        visitType: isDoctorType ? 'Doctor' : visitType === 'Stockist' ? 'Stockist' : 'Chemist',
         callType,
         callOutcome: visitOutcome,
         isOrderBooked,
         orderValue: isOrderBooked && orderValue ? parseFloat(orderValue) : undefined,
         nextActionPlan: remarks,
         samples: samples.map(s => ({ productId: s.productId, quantity: s.quantity })),
+        photos: uploadedPhotos.length > 0 ? uploadedPhotos : undefined,
       });
       dispatch(addVisit(visit));
       showAlert('Success', 'Visit logged successfully!', () => navigation.goBack());
@@ -385,20 +560,30 @@ const VisitCheckInScreen: React.FC = () => {
           {/* ── Location ── */}
           <View style={styles.group}>
             <SectionLabel label="Location Check-in" />
-            <View style={[styles.inputRow, location ? styles.inputRowSuccess : null]}>
+            <View style={[
+              styles.inputRow,
+              location ? styles.inputRowSuccess : null,
+              locationBlocked ? styles.inputRowError : null,
+            ]}>
               <MaterialCommunityIcons
                 name="crosshairs-gps"
                 size={20}
-                color={location ? COLORS.success : COLORS.textSecondary}
+                color={locationBlocked ? COLORS.error : location ? COLORS.success : COLORS.textSecondary}
               />
               {gettingLocation ? (
                 <>
                   <ActivityIndicator size="small" color={COLORS.primary} style={{ marginHorizontal: 8 }} />
                   <Text style={[styles.inputText, { color: COLORS.textSecondary }]}>Fetching location...</Text>
                 </>
+              ) : locationBlocked ? (
+                <TouchableOpacity style={{ flex: 1 }} onPress={getCurrentLocation}>
+                  <Text style={[styles.inputText, { color: COLORS.error }]} numberOfLines={2}>
+                    {locationBlocked}
+                  </Text>
+                </TouchableOpacity>
               ) : location ? (
-                <Text style={[styles.inputText, { color: COLORS.success, flex: 1, fontWeight: '500' }]} numberOfLines={1}>
-                  {location.latitude.toFixed(4)}° N, {location.longitude.toFixed(4)}° E
+                <Text style={[styles.inputText, { color: COLORS.success, flex: 1, fontWeight: '500' }]} numberOfLines={1} ellipsizeMode="tail">
+                  {location.address ?? `${location.latitude.toFixed(4)}° N, ${location.longitude.toFixed(4)}° E`}
                 </Text>
               ) : (
                 <TouchableOpacity style={{ flex: 1 }} onPress={getCurrentLocation}>
@@ -406,7 +591,7 @@ const VisitCheckInScreen: React.FC = () => {
                 </TouchableOpacity>
               )}
             </View>
-            {location && (
+            {location && !locationBlocked && (
               <Text style={styles.hintSuccess}>
                 <MaterialCommunityIcons name="check-circle" size={11} color={COLORS.success} /> Auto-fetched on load
               </Text>
@@ -443,16 +628,29 @@ const VisitCheckInScreen: React.FC = () => {
             </View>
           ) : null}
 
-          {/* ── Geo-fence Warning ── */}
+          {/* ── Geo-fence Warning / Block ── */}
           {distanceMeters !== null && distanceMeters > GEO_WARN_THRESHOLD_M && (
-            <View style={styles.distanceWarning}>
-              <MaterialCommunityIcons name="map-marker-alert" size={18} color="#92400e" />
-              <Text style={styles.distanceWarningText}>
+            <View style={[
+              styles.distanceWarning,
+              distanceMeters > GEO_BLOCK_THRESHOLD_M && styles.distanceBlock,
+            ]}>
+              <MaterialCommunityIcons
+                name={distanceMeters > GEO_BLOCK_THRESHOLD_M ? 'map-marker-remove' : 'map-marker-alert'}
+                size={18}
+                color={distanceMeters > GEO_BLOCK_THRESHOLD_M ? COLORS.error : '#92400e'}
+              />
+              <Text style={[
+                styles.distanceWarningText,
+                distanceMeters > GEO_BLOCK_THRESHOLD_M && styles.distanceBlockText,
+              ]}>
                 You are{' '}
                 {distanceMeters >= 1000
                   ? `${(distanceMeters / 1000).toFixed(1)} km`
                   : `${Math.round(distanceMeters)} m`}{' '}
-                away from this {visitType === 'Doctor / Clinic' ? 'clinic' : 'pharmacy'}. Visit will still be logged.
+                away from this {visitType === 'Doctor / Clinic' ? 'clinic' : visitType === 'Stockist' ? 'stockist' : 'pharmacy'}.{' '}
+                {distanceMeters > GEO_BLOCK_THRESHOLD_M
+                  ? 'You must be within 2 km to log this visit.'
+                  : 'Visit will still be logged.'}
               </Text>
             </View>
           )}
@@ -476,97 +674,131 @@ const VisitCheckInScreen: React.FC = () => {
             </View>
           </View>
 
-          {/* ── Samples Given ── */}
+          {/* ── Visit Duration ── */}
           <View style={styles.group}>
-            <SectionLabel label="Samples Given" />
+            <SectionLabel label="Visit Duration (minutes)" />
             <View style={styles.inputRow}>
-              <MaterialCommunityIcons name="magnify" size={20} color={COLORS.textSecondary} />
+              <MaterialCommunityIcons name="clock-fast" size={20} color={COLORS.textSecondary} />
               <TextInput
                 style={styles.innerInput}
-                placeholder="Search product to add..."
+                placeholder="e.g. 30"
                 placeholderTextColor={COLORS.textSecondary}
-                value={productQuery}
-                onChangeText={searchProducts}
+                keyboardType="number-pad"
+                value={visitDuration}
+                onChangeText={v => setVisitDuration(v.replace(/[^0-9]/g, ''))}
+                maxLength={4}
               />
-              {searchingProduct && <ActivityIndicator size="small" color={COLORS.primary} />}
+              {visitDuration ? (
+                <Text style={{ fontSize: SIZES.fontSM, color: COLORS.textSecondary }}>min</Text>
+              ) : null}
             </View>
-
-            {/* Dropdown */}
-            {showProductDrop && productResults.length > 0 && (
-              <View style={styles.dropdown}>
-                {productResults.slice(0, 5).map(p => (
-                  <TouchableOpacity
-                    key={p.id}
-                    style={styles.dropdownItem}
-                    onPress={() => addSample(p)}
-                  >
-                    <Text style={styles.dropdownItemText}>{p.productName}</Text>
-                    {p.packSize ? (
-                      <Text style={styles.dropdownItemSub}>{p.packSize}</Text>
-                    ) : null}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {/* Selected samples list */}
-            {samples.length > 0 && (
-              <View style={styles.samplesList}>
-                {samples.map((s, idx) => (
-                  <View
-                    key={s.productId}
-                    style={[
-                      styles.sampleRow,
-                      idx < samples.length - 1 && styles.sampleRowBorder,
-                    ]}
-                  >
-                    <Text style={styles.sampleName} numberOfLines={1}>{s.productName}</Text>
-                    <View style={styles.sampleControls}>
-                      <TextInput
-                        style={styles.qtyInput}
-                        keyboardType="numeric"
-                        value={String(s.quantity)}
-                        onChangeText={v =>
-                          setSamples(samples.map(x =>
-                            x.productId === s.productId ? { ...x, quantity: parseInt(v) || 1 } : x
-                          ))
-                        }
-                      />
-                      <TouchableOpacity onPress={() => setSamples(samples.filter(x => x.productId !== s.productId))}>
-                        <MaterialCommunityIcons name="delete-outline" size={20} color={COLORS.error} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-              </View>
-            )}
           </View>
+
+          {/* ── Interaction fields — only relevant when doctor was met ── */}
+          {visitOutcome !== 'Met' ? (
+            <View style={styles.skippedNotice}>
+              <MaterialCommunityIcons name="information-outline" size={16} color={COLORS.textSecondary} />
+              <Text style={styles.skippedText}>
+                Samples and order fields are hidden for "{visitOutcome}" visits.
+              </Text>
+            </View>
+          ) : null}
+
+          {/* ── Samples Given ── */}
+          {visitOutcome === 'Met' && (
+            <View style={styles.group}>
+              <SectionLabel label="Samples Given" />
+              <View style={styles.inputRow}>
+                <MaterialCommunityIcons name="magnify" size={20} color={COLORS.textSecondary} />
+                <TextInput
+                  style={styles.innerInput}
+                  placeholder="Search product to add..."
+                  placeholderTextColor={COLORS.textSecondary}
+                  value={productQuery}
+                  onChangeText={searchProducts}
+                />
+                {searchingProduct && <ActivityIndicator size="small" color={COLORS.primary} />}
+              </View>
+
+              {/* Dropdown */}
+              {showProductDrop && productResults.length > 0 && (
+                <View style={styles.dropdown}>
+                  {productResults.slice(0, 5).map(p => (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={styles.dropdownItem}
+                      onPress={() => addSample(p)}
+                    >
+                      <Text style={styles.dropdownItemText}>{p.productName}</Text>
+                      {p.packSize ? (
+                        <Text style={styles.dropdownItemSub}>{p.packSize}</Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              {/* Selected samples list */}
+              {samples.length > 0 && (
+                <View style={styles.samplesList}>
+                  {samples.map((s, idx) => (
+                    <View
+                      key={s.productId}
+                      style={[
+                        styles.sampleRow,
+                        idx < samples.length - 1 && styles.sampleRowBorder,
+                      ]}
+                    >
+                      <Text style={styles.sampleName} numberOfLines={1}>{s.productName}</Text>
+                      <View style={styles.sampleControls}>
+                        <TextInput
+                          style={styles.qtyInput}
+                          keyboardType="numeric"
+                          value={String(s.quantity)}
+                          onChangeText={v =>
+                            setSamples(samples.map(x =>
+                              x.productId === s.productId ? { ...x, quantity: parseInt(v) || 1 } : x
+                            ))
+                          }
+                        />
+                        <TouchableOpacity onPress={() => setSamples(samples.filter(x => x.productId !== s.productId))}>
+                          <MaterialCommunityIcons name="delete-outline" size={20} color={COLORS.error} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
 
           {/* ── Is Order Booked? ── */}
-          <View style={styles.group}>
-            <SectionLabel label="Is Order Booked?" />
-            <View style={styles.radioRow}>
-              <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(true)}>
-                <MaterialCommunityIcons
-                  name={isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
-                  size={22}
-                  color={isOrderBooked ? COLORS.primary : COLORS.textSecondary}
-                />
-                <Text style={styles.radioLabel}>Yes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(false)}>
-                <MaterialCommunityIcons
-                  name={!isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
-                  size={22}
-                  color={!isOrderBooked ? COLORS.primary : COLORS.textSecondary}
-                />
-                <Text style={styles.radioLabel}>No</Text>
-              </TouchableOpacity>
+          {visitOutcome === 'Met' && (
+            <View style={styles.group}>
+              <SectionLabel label="Is Order Booked?" />
+              <View style={styles.radioRow}>
+                <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(true)}>
+                  <MaterialCommunityIcons
+                    name={isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
+                    size={22}
+                    color={isOrderBooked ? COLORS.primary : COLORS.textSecondary}
+                  />
+                  <Text style={styles.radioLabel}>Yes</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(false)}>
+                  <MaterialCommunityIcons
+                    name={!isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
+                    size={22}
+                    color={!isOrderBooked ? COLORS.primary : COLORS.textSecondary}
+                  />
+                  <Text style={styles.radioLabel}>No</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          )}
 
           {/* ── Order Value (conditional) ── */}
-          {isOrderBooked && (
+          {visitOutcome === 'Met' && isOrderBooked && (
             <View style={styles.group}>
               <SectionLabel label="Order Value (₹)" />
               <View style={styles.inputRow}>
@@ -596,6 +828,66 @@ const VisitCheckInScreen: React.FC = () => {
               onChangeText={setRemarks}
               textAlignVertical="top"
             />
+          </View>
+
+          {/* ── Visit Photos ── */}
+          <View style={styles.group}>
+            <View style={styles.photoSectionHeader}>
+              <SectionLabel label="Visit Photos" />
+              <TouchableOpacity onPress={handleOpenCamera} style={styles.cameraIconBtn}>
+                <MaterialCommunityIcons name="camera-plus" size={22} color={COLORS.primary} />
+              </TouchableOpacity>
+            </View>
+
+            {photos.length === 0 ? (
+              <TouchableOpacity style={styles.cameraPlaceholder} onPress={handleOpenCamera}>
+                <MaterialCommunityIcons name="camera-outline" size={30} color={COLORS.textDisabled} />
+                <Text style={styles.cameraPlaceholderText}>Tap to add a photo</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.photoGrid}>
+                {photos.map((photo, index) => (
+                  <View key={index} style={styles.photoCard}>
+                    <Image
+                      source={{ uri: photo.uri }}
+                      style={[styles.photoThumb, photo.isFront && { transform: [{ rotate: '-90deg' }] }]}
+                    />
+
+                    {/* Type chips */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeScroll}>
+                      {PHOTO_TYPES.map(type => (
+                        <TouchableOpacity
+                          key={type}
+                          style={[styles.typeChip, photo.photoType === type && styles.typeChipSelected]}
+                          onPress={() => updatePhotoType(index, type)}
+                        >
+                          <Text style={[styles.typeChipText, photo.photoType === type && styles.typeChipTextSelected]}>
+                            {type}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+
+                    {/* Caption */}
+                    <TouchableOpacity style={styles.captionRow} onPress={() => openCaptionEdit(index)}>
+                      <MaterialCommunityIcons name="pencil-outline" size={12} color={COLORS.textSecondary} />
+                      <Text style={styles.captionText} numberOfLines={1}>
+                        {photo.caption ? photo.caption : 'Add caption...'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Delete */}
+                    <TouchableOpacity style={styles.photoDeleteBtn} onPress={() => removePhoto(index)}>
+                      <MaterialCommunityIcons name="close-circle" size={18} color={COLORS.error} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+
+                <TouchableOpacity style={styles.addMorePhoto} onPress={handleOpenCamera}>
+                  <MaterialCommunityIcons name="camera-plus-outline" size={26} color={COLORS.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           {/* ── Save Button ── */}
@@ -682,7 +974,13 @@ const VisitCheckInScreen: React.FC = () => {
             renderItem={({ item }) => (
               <TouchableOpacity style={styles.partyResultItem} onPress={() => selectParty(item)}>
                 <MaterialCommunityIcons
-                  name={visitType === 'Doctor / Clinic' ? 'doctor' : 'pharmacy'}
+                  name={
+                    visitType === 'Doctor / Clinic'
+                      ? 'doctor'
+                      : visitType === 'Stockist'
+                      ? 'warehouse'
+                      : 'store-outline'
+                  }
                   size={20}
                   color={COLORS.primary}
                 />
@@ -730,11 +1028,79 @@ const VisitCheckInScreen: React.FC = () => {
         title="Visit Status"
         options={visitOutcomes}
         selected={visitOutcome}
-        onSelect={v => { setVisitOutcome(v); setShowOutcomePicker(false); }}
+        onSelect={v => {
+          setVisitOutcome(v);
+          setShowOutcomePicker(false);
+          if (v !== 'Met') {
+            setSamples([]);
+            setIsOrderBooked(false);
+            setOrderValue('');
+          }
+        }}
         onClose={() => setShowOutcomePicker(false)}
       />
 
-      <Loading visible={saving} message="Saving visit..." />
+      <Loading visible={saving} message="Uploading photos and saving visit..." />
+
+      {/* ── Camera Modal ── */}
+      <Modal visible={showCamera} animationType="slide" statusBarTranslucent>
+        <View style={styles.cameraContainer}>
+          {device ? (
+            <Camera
+              ref={cameraRef}
+              style={StyleSheet.absoluteFill}
+              device={device}
+              isActive={showCamera}
+              photo
+            />
+          ) : (
+            <View style={[StyleSheet.absoluteFill, styles.noCameraBox]}>
+              <Text style={styles.noCameraText}>Camera not available</Text>
+            </View>
+          )}
+
+          <View style={styles.cameraControls}>
+            <TouchableOpacity style={styles.cancelCameraBtn} onPress={() => setShowCamera(false)}>
+              <MaterialCommunityIcons name="close" size={28} color={COLORS.textWhite} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.shutterBtn} onPress={handleCapture}>
+              <View style={styles.shutterInner} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cancelCameraBtn}
+              onPress={() => setCameraFacing(f => f === 'back' ? 'front' : 'back')}
+            >
+              <MaterialCommunityIcons name="camera-flip-outline" size={28} color={COLORS.textWhite} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Caption Edit Modal ── */}
+      <Modal visible={captionEditIdx !== null} transparent animationType="fade">
+        <View style={styles.captionModalOverlay}>
+          <View style={styles.captionModalBox}>
+            <Text style={styles.captionModalTitle}>Add Caption</Text>
+            <TextInput
+              style={styles.captionModalInput}
+              value={captionDraft}
+              onChangeText={setCaptionDraft}
+              placeholder="e.g., With Dr. Mehta at clinic"
+              placeholderTextColor={COLORS.textSecondary}
+              autoFocus
+              maxLength={120}
+            />
+            <View style={styles.modalBtnRow}>
+              <TouchableOpacity style={styles.modalCancelBtn} onPress={() => setCaptionEditIdx(null)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalConfirmBtn} onPress={saveCaptionEdit}>
+                <Text style={styles.modalConfirmText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 };
@@ -797,6 +1163,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0fdf4',
     borderColor: '#a7f3d0',
   },
+  inputRowError: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+  },
   inputText: {
     fontSize: SIZES.fontMD,
     color: COLORS.textPrimary,
@@ -856,6 +1226,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: SIZES.paddingMD,
     gap: 8,
+  },
+  distanceBlock: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fca5a5',
+  },
+  distanceBlockText: {
+    color: COLORS.error,
   },
   distanceWarningText: {
     flex: 1,
@@ -966,6 +1343,23 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontMD,
     color: COLORS.textPrimary,
     minHeight: 80,
+  },
+
+  skippedNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.surface,
+    borderRadius: SIZES.radiusSM,
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: 10,
+    marginBottom: SIZES.paddingMD,
+  },
+  skippedText: {
+    flex: 1,
+    fontSize: SIZES.fontSM,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
   },
 
   // Save button
@@ -1112,6 +1506,169 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontMD,
     padding: SIZES.paddingLG,
   },
+
+  // ── Photo section ──
+  photoSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  cameraIconBtn: { padding: 4 },
+  cameraPlaceholder: {
+    borderWidth: 1.5,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+    borderRadius: SIZES.radiusSM,
+    paddingVertical: SIZES.paddingLG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.backgroundGray,
+    gap: 6,
+  },
+  cameraPlaceholderText: {
+    fontSize: SIZES.fontSM,
+    color: COLORS.textDisabled,
+  },
+  photoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  photoCard: {
+    width: 130,
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radiusSM,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    overflow: 'hidden',
+  },
+  photoThumb: {
+    width: '100%',
+    height: 100,
+    backgroundColor: COLORS.backgroundGray,
+  },
+  typeScroll: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  typeChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: 4,
+    backgroundColor: COLORS.backgroundGray,
+  },
+  typeChipSelected: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  typeChipText: { fontSize: 10, color: COLORS.textSecondary },
+  typeChipTextSelected: { color: COLORS.textWhite, fontWeight: '600' },
+  captionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingBottom: 6,
+    gap: 4,
+  },
+  captionText: {
+    fontSize: 11,
+    color: COLORS.textSecondary,
+    flex: 1,
+    fontStyle: 'italic',
+  },
+  photoDeleteBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: COLORS.background,
+    borderRadius: 10,
+  },
+  addMorePhoto: {
+    width: 130,
+    height: 100,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+    borderStyle: 'dashed',
+    borderRadius: SIZES.radiusSM,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.backgroundGray,
+  },
+
+  // ── Camera modal ──
+  cameraContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  cameraControls: {
+    position: 'absolute',
+    bottom: 40,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 40,
+  },
+  cancelCameraBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shutterBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 4,
+    borderColor: 'rgba(255,255,255,0.6)',
+  },
+  shutterInner: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#fff',
+  },
+  noCameraBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111',
+  },
+  noCameraText: { color: '#fff', fontSize: SIZES.fontMD },
+
+  // ── Caption modal ──
+  captionModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: SIZES.paddingLG,
+  },
+  captionModalBox: {
+    backgroundColor: COLORS.background,
+    borderRadius: SIZES.radiusLG,
+    padding: SIZES.paddingLG,
+  },
+  captionModalTitle: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SIZES.paddingMD,
+  },
+  captionModalInput: {
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.radiusSM,
+    padding: SIZES.paddingSM,
+    fontSize: SIZES.fontMD,
+    color: COLORS.textPrimary,
+    marginBottom: SIZES.paddingMD,
+  },
 });
 
-export default VisitCheckInScreen;
+export default LogVisitScreen;

@@ -18,8 +18,7 @@ import DeviceInfo from 'react-native-device-info';
 import { Loading, ErrorMessage } from '../../components/common';
 import { useAppSelector } from '../../store/hooks';
 import { COLORS, SIZES } from '../../constants';
-import { formatDate } from '../../utils/dateUtils';
-import { visitApi, attendanceApi } from '../../services/api';
+import { visitApi, attendanceApi, tourPlanApi } from '../../services/api';
 import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { useAuth } from '../../hooks/useAuth';
 import { useLocationTracker } from '../../hooks/useLocationTracker';
@@ -51,7 +50,7 @@ const DashboardScreen: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats>({
     todayVisits: 0,
     orderValue: 0,
-    targetVisits: 12,
+    targetVisits: 0,
   });
   const [todayVisits, setTodayVisits] = useState<Visit[]>([]);
   const [isPunchedIn, setIsPunchedIn] = useState(false);
@@ -67,9 +66,11 @@ const DashboardScreen: React.FC = () => {
     try {
       setError(null);
 
-      const [visitsResponse, attendanceStatus] = await Promise.all([
+      const today = new Date();
+      const [visitsResponse, attendanceStatus, tourPlan] = await Promise.all([
         visitApi.getTodayVisits(),
         attendanceApi.getAttendanceStatus(),
+        tourPlanApi.getMyPlanByMonth(today.getMonth() + 1, today.getFullYear()).catch(() => null),
       ]);
 
       const visits: Visit[] = Array.isArray(visitsResponse) ? visitsResponse : [];
@@ -78,11 +79,18 @@ const DashboardScreen: React.FC = () => {
         .filter((v) => v.isOrderBooked && v.orderValue)
         .reduce((sum, v) => sum + (v.orderValue ?? 0), 0);
 
+      const todayStr = today.toISOString().split('T')[0];
+      const todayPlan = tourPlan?.details?.find((d) => d.planDate.startsWith(todayStr));
+      const targetVisits = todayPlan
+        ? (todayPlan.plannedDoctorIds.length || todayPlan.estimatedCalls || 0)
+        : 0;
+
       setTodayVisits(visits);
       setStats((prev) => ({
         ...prev,
         todayVisits: visits.length,
         orderValue: totalOrderValue,
+        targetVisits,
       }));
       setIsPunchedIn(attendanceStatus.hasPunchedIn && !attendanceStatus.hasPunchedOut);
       setHasPunchedOut(attendanceStatus.hasPunchedOut);
@@ -202,7 +210,9 @@ const DashboardScreen: React.FC = () => {
     return 'Good Evening,';
   };
 
-  const visitProgress = Math.min((stats.todayVisits / stats.targetVisits) * 100, 100);
+  const visitProgress = stats.targetVisits > 0
+    ? Math.min((stats.todayVisits / stats.targetVisits) * 100, 100)
+    : 0;
 
   const orderValueProgress = Math.min((stats.orderValue / 20000) * 100, 100);
 
@@ -218,7 +228,7 @@ const DashboardScreen: React.FC = () => {
       label: 'Log Visit',
       color: COLORS.primary,
       bg: COLORS.primaryLight,
-      onPress: () => navigation.navigate('Visits' as any, { screen: 'VisitCheckIn' } as any),
+      onPress: () => navigation.navigate('Visits' as any, { screen: 'LogVisit' } as any),
     },
     {
       icon: 'clipboard-check-outline',
@@ -236,7 +246,7 @@ const DashboardScreen: React.FC = () => {
           );
           return;
         }
-        navigation.navigate('DCR' as any, { screen: 'CreateDCR' } as any);
+        navigation.navigate('DCR' as any);
       },
     },
     {
@@ -283,12 +293,6 @@ const DashboardScreen: React.FC = () => {
               <MaterialCommunityIcons name="bell-outline" size={22} color={COLORS.textWhite} />
             </TouchableOpacity>
           </View>
-          <View style={styles.locationRow}>
-            <MaterialCommunityIcons name="map-marker" size={14} color="rgba(255,255,255,0.8)" />
-            <Text style={styles.locationText}>
-              {mrProfile?.city || mrProfile?.state || formatDate(new Date(), 'EEEE, dd MMM yyyy')}
-            </Text>
-          </View>
         </View>
 
         {/* ── Floating Attendance Card — negative marginTop pulls it over the header ── */}
@@ -334,7 +338,9 @@ const DashboardScreen: React.FC = () => {
               <Text style={styles.metricLabel}>Visits Today</Text>
               <Text style={styles.metricValue}>
                 {stats.todayVisits}
-                <Text style={styles.metricTarget}> / {stats.targetVisits}</Text>
+                {stats.targetVisits > 0 && (
+                  <Text style={styles.metricTarget}> / {stats.targetVisits}</Text>
+                )}
               </Text>
               <View style={styles.progressBar}>
                 <View style={[styles.progressFill, { width: `${visitProgress}%`, backgroundColor: '#4338ca' }]} />
@@ -388,16 +394,15 @@ const DashboardScreen: React.FC = () => {
             </View>
           ) : (
             todayVisits.slice(0, 5).map((visit) => {
+              const isDoctor = !!visit.doctorId;
+              const isStockist = !!visit.stockistId;
               const partyName =
-                visit.visitType === 'Doctor'
-                  ? visit.doctorName ?? 'Unknown Doctor'
-                  : visit.chemistName ?? 'Unknown Chemist';
-              const subtitle =
-                visit.visitType === 'Doctor'
-                  ? [visit.doctorSpecialty, visit.doctorId ? undefined : undefined]
-                      .filter(Boolean)
-                      .join(' • ') || 'Doctor'
-                  : [visit.chemistShopName].filter(Boolean).join(' • ') || 'Chemist';
+                visit.doctorName ?? visit.chemistName ?? visit.stockistName ?? 'Unknown';
+              const subtitle = isDoctor
+                ? visit.doctorSpecialty || 'Doctor'
+                : isStockist
+                ? visit.stockistCompanyName || 'Stockist'
+                : visit.chemistShopName || 'Chemist';
 
               const initials = partyName
                 .split(' ')
@@ -509,17 +514,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  locationText: {
-    fontSize: SIZES.fontXS,
-    color: 'rgba(255,255,255,0.8)',
-    marginLeft: 2,
-  },
-
   scrollView: {
     flex: 1,
     backgroundColor: COLORS.backgroundGray,

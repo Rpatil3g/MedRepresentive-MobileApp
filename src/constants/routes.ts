@@ -20,13 +20,12 @@ export const ROUTES = {
   
   // Visit Stack
   VISIT_LIST: 'VisitList',
-  VISIT_CHECK_IN: 'VisitCheckIn',
+  LOG_VISIT: 'LogVisit',
   VISIT_DETAIL: 'VisitDetail',
   
   // DCR Stack
   DCR_LIST: 'DCRList',
   CREATE_DCR: 'CreateDCR',
-  DCR_DETAIL: 'DCRDetail',
   DCR_CALENDAR: 'DCRCalendar',
   
   // Task Stack

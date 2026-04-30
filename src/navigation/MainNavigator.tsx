@@ -1,7 +1,8 @@
 import React from 'react';
-import { TouchableOpacity } from 'react-native';
+import { TouchableOpacity, View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
+import { useAppSelector } from '../store/hooks';
 import {
   MainTabParamList,
   DoctorStackParamList,
@@ -25,10 +26,10 @@ import DoctorDetailScreen from '../screens/doctors/DoctorDetailScreen';
 import AddDoctorScreen from '../screens/doctors/AddDoctorScreen';
 
 // Visit Screens
-import { VisitListScreen, VisitCheckInScreen, VisitDetailScreen, VisitCheckOutScreen } from '../screens/visits';
+import { VisitListScreen, LogVisitScreen, VisitDetailScreen, VisitEditScreen } from '../screens/visits';
 
 // DCR Screens
-import { DCRListScreen, CreateDCRScreen, DCRCalendarScreen, DCRDetailScreen } from '../screens/dcr';
+import { DCRListScreen, CreateDCRScreen, DCRCalendarScreen } from '../screens/dcr';
 
 // Task Screens
 import { TaskListScreen, TaskDetailScreen } from '../screens/tasks';
@@ -111,9 +112,9 @@ const VisitStackNavigator: React.FC = () => (
       options={{ title: 'Visits' }}
     />
     <VisitStack.Screen
-      name={ROUTES.VISIT_CHECK_IN}
-      component={VisitCheckInScreen}
-      options={{ title: 'Check In' }}
+      name={ROUTES.LOG_VISIT}
+      component={LogVisitScreen}
+      options={{ title: 'Log Visit' }}
     />
     <VisitStack.Screen
       name={ROUTES.VISIT_DETAIL}
@@ -121,9 +122,9 @@ const VisitStackNavigator: React.FC = () => (
       options={{ title: 'Visit Details' }}
     />
     <VisitStack.Screen
-      name="VisitCheckOut"
-      component={VisitCheckOutScreen}
-      options={{ title: 'Check Out Visit' }}
+      name="VisitEdit"
+      component={VisitEditScreen}
+      options={{ title: 'Edit Visit' }}
     />
   </VisitStack.Navigator>
 );
@@ -141,14 +142,14 @@ const DCRStackNavigator: React.FC = () => (
       options={{ title: 'Create DCR' }}
     />
     <DCRStack.Screen
-      name={ROUTES.DCR_DETAIL}
-      component={DCRDetailScreen}
-      options={{ title: 'DCR Details' }}
-    />
-    <DCRStack.Screen
       name={ROUTES.DCR_CALENDAR}
       component={DCRCalendarScreen}
       options={{ title: 'DCR Calendar' }}
+    />
+    <DCRStack.Screen
+      name="VisitEdit"
+      component={VisitEditScreen}
+      options={{ title: 'Edit Visit' }}
     />
   </DCRStack.Navigator>
 );
@@ -236,6 +237,17 @@ const MoreStackNavigator: React.FC = () => (
   </MoreStack.Navigator>
 );
 
+const DCRTabIcon: React.FC<{ color: string; size: number }> = ({ color, size }) => {
+  const dcrs = useAppSelector(state => state.dcr.dcrs);
+  const hasRejected = dcrs.some(d => d.status === 'Rejected');
+  return (
+    <View>
+      <MaterialCommunityIcons name="clipboard-text" color={color} size={size} />
+      {hasRejected && <View style={navStyles.rejectedDot} />}
+    </View>
+  );
+};
+
 const MainNavigator: React.FC = () => {
   return (
     <Tab.Navigator
@@ -288,6 +300,17 @@ const MainNavigator: React.FC = () => {
       />
 
       <Tab.Screen
+        name={ROUTES.DCR}
+        component={DCRStackNavigator}
+        options={{
+          tabBarLabel: 'DCR',
+          tabBarIcon: ({ color, size }) => (
+            <DCRTabIcon color={color} size={size} />
+          ),
+        }}
+      />
+
+      <Tab.Screen
         name={ROUTES.PRODUCTS}
         component={ProductStackNavigator}
         options={{
@@ -329,15 +352,6 @@ const MainNavigator: React.FC = () => {
       />
 
       <Tab.Screen
-        name={ROUTES.DCR}
-        component={DCRStackNavigator}
-        options={{
-          tabBarItemStyle: { display: 'none' },
-          tabBarButton: () => null,
-        }}
-      />
-
-      <Tab.Screen
         name={ROUTES.DOCTORS}
         component={DoctorStackNavigator}
         options={{
@@ -348,5 +362,19 @@ const MainNavigator: React.FC = () => {
     </Tab.Navigator>
   );
 };
+
+const navStyles = StyleSheet.create({
+  rejectedDot: {
+    position: 'absolute',
+    top: -1,
+    right: -4,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.error,
+    borderWidth: 1.5,
+    borderColor: COLORS.background,
+  },
+});
 
 export default MainNavigator;

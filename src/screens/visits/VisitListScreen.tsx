@@ -6,18 +6,19 @@ import {
   FlatList,
   TouchableOpacity,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Card, ErrorMessage, Loading } from '../../components/common';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { setVisits, setTodayVisits } from '../../store/slices/visitSlice';
-import { visitApi } from '../../services/api';
+import { setVisits, setTodayVisits, removeVisit } from '../../store/slices/visitSlice';
+import { visitApi, dcrApi } from '../../services/api';
 import { Visit } from '../../types/visit.types';
 import { VisitStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES, ROUTES } from '../../constants';
-import { formatTime } from '../../utils/dateUtils';
+import { formatTime, formatDate } from '../../utils/dateUtils';
 
 type VisitListNavigationProp = StackNavigationProp<VisitStackParamList, 'VisitList'>;
 
@@ -72,74 +73,143 @@ const VisitListScreen: React.FC = () => {
   };
 
   const handleStartVisit = () => {
-    navigation.navigate(ROUTES.VISIT_CHECK_IN, {});
+    navigation.navigate(ROUTES.LOG_VISIT, {});
   };
 
-  const renderVisitCard = ({ item }: { item: Visit }) => {
+  const handleDeleteVisit = (visit: Visit) => {
+    Alert.alert(
+      'Delete Visit',
+      `Delete visit with ${visit.doctorName || visit.chemistName || visit.stockistName || 'this contact'}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const visitDate = formatDate(visit.visitDateTime, 'yyyy-MM-dd');
+              const dcr = await dcrApi.getDCRByDate(visitDate);
+              if (dcr && (dcr.status === 'Submitted' || dcr.status === 'Approved')) {
+                Alert.alert(
+                  'Cannot Delete',
+                  'DCR for this date is already submitted. Contact your manager to make changes.'
+                );
+                return;
+              }
+              await visitApi.deleteVisit(visit.id);
+              dispatch(removeVisit(visit.id));
+            } catch {
+              Alert.alert('Error', 'Failed to delete visit. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const renderVisitCard = ({ item, index }: { item: Visit; index: number }) => {
     const isActive = item.status === 'Checked-In';
-    const isCompleted = item.status === 'Checked-Out';
+    const isCompleted = item.status === 'Checked-Out' || item.status === 'Completed';
+    const isCancelled = item.status === 'Cancelled';
+
+    const accentColor = isActive
+      ? COLORS.warning
+      : isCompleted
+      ? COLORS.success
+      : isCancelled
+      ? COLORS.error
+      : COLORS.textDisabled;
+
+    const statusLabel = isActive ? 'Active' : item.status;
 
     return (
       <TouchableOpacity onPress={() => handleVisitPress(item)} activeOpacity={0.7}>
-        <Card style={styles.visitCard}>
-          <View style={styles.cardHeader}>
-            <View style={styles.iconContainer}>
-              <MaterialCommunityIcons
-                name={item.visitType === 'Doctor' ? 'doctor' : 'pharmacy'}
-                size={28}
-                color={isActive ? COLORS.warning : isCompleted ? COLORS.success : COLORS.primary}
-              />
-            </View>
-            <View style={styles.visitInfo}>
-              <Text style={styles.visitTitle}>
-                {item.doctorName || item.chemistName || 'Unknown'}
-              </Text>
-              {item.doctorSpecialty && (
-                <Text style={styles.visitSubtitle}>{item.doctorSpecialty}</Text>
-              )}
-              <Text style={styles.visitTime}>
-                Check-in: {formatTime(item.checkInTime)}
-                {item.checkOutTime && ` • Check-out: ${formatTime(item.checkOutTime)}`}
-              </Text>
-            </View>
-            <View
-              style={[
-                styles.statusBadge,
-                isActive && styles.statusBadgeActive,
-                isCompleted && styles.statusBadgeCompleted,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusText,
-                  isActive && styles.statusTextActive,
-                  isCompleted && styles.statusTextCompleted,
-                ]}
-              >
-                {item.status}
-              </Text>
-            </View>
-          </View>
+        <Card style={styles.visitCard} padding={0}>
+          <View style={styles.cardBody}>
+            {/* Header row */}
+            <View style={styles.cardHeader}>
+              <View style={styles.iconContainer}>
+                <MaterialCommunityIcons
+                  name={item.visitType === 'Doctor' ? 'doctor' : 'store-outline'}
+                  size={24}
+                  color={COLORS.primary}
+                />
+              </View>
 
-          <View style={styles.cardFooter}>
-            {item.isPlannedVisit && (
-              <View style={styles.tag}>
-                <MaterialCommunityIcons name="calendar-check" size={14} color={COLORS.info} />
-                <Text style={styles.tagText}>Planned</Text>
+              <View style={styles.visitInfo}>
+                <View style={styles.titleRow}>
+                  <Text style={styles.visitNumber}>#{index + 1}</Text>
+                  <Text style={styles.visitTitle} numberOfLines={1}>
+                    {item.doctorName || item.chemistName || item.stockistName || 'Unknown'}
+                  </Text>
+                </View>
+                {item.doctorSpecialty && (
+                  <Text style={styles.visitSubtitle}>{item.doctorSpecialty}</Text>
+                )}
+                <Text style={styles.visitTime}>
+                  {formatTime(item.visitDateTime)}
+                  {item.checkOutTime ? ` — ${formatTime(item.checkOutTime)}` : ''}
+                </Text>
               </View>
-            )}
-            {item.isGeofenceBreach && (
-              <View style={[styles.tag, styles.tagWarning]}>
-                <MaterialCommunityIcons name="alert" size={14} color={COLORS.warning} />
-                <Text style={[styles.tagText, styles.tagTextWarning]}>Out of Range</Text>
+
+              {/* Status badge */}
+              <View style={[styles.statusBadge, { backgroundColor: accentColor }]}>
+                <Text style={styles.statusText}>{statusLabel}</Text>
               </View>
-            )}
-            {item.visitDurationMinutes > 0 && (
-              <View style={styles.tag}>
-                <MaterialCommunityIcons name="clock" size={14} color={COLORS.textSecondary} />
-                <Text style={styles.tagText}>{item.visitDurationMinutes} min</Text>
-              </View>
-            )}
+            </View>
+
+            {/* Info chips row */}
+            <View style={styles.cardFooter}>
+              {item.visitDurationMinutes > 0 && (
+                <View style={styles.durationChip}>
+                  <MaterialCommunityIcons name="clock-outline" size={13} color={COLORS.textSecondary} />
+                  <Text style={styles.durationChipText}>{item.visitDurationMinutes} min</Text>
+                </View>
+              )}
+              {item.isOrderBooked && (
+                <View style={[styles.chip, styles.chipOrder]}>
+                  <MaterialCommunityIcons name="cash-multiple" size={13} color="#7c3aed" />
+                  <Text style={[styles.chipText, { color: '#7c3aed' }]}>Order</Text>
+                </View>
+              )}
+              {item.samples.length > 0 && (
+                <View style={styles.chip}>
+                  <MaterialCommunityIcons name="package-variant" size={13} color={COLORS.info} />
+                  <Text style={[styles.chipText, { color: COLORS.info }]}>
+                    {item.samples.length} Sample{item.samples.length > 1 ? 's' : ''}
+                  </Text>
+                </View>
+              )}
+              {item.productsDiscussed.length > 0 && (
+                <View style={styles.chip}>
+                  <MaterialCommunityIcons name="pill" size={13} color={COLORS.primary} />
+                  <Text style={[styles.chipText, { color: COLORS.primary }]}>
+                    {item.productsDiscussed.length} Product{item.productsDiscussed.length > 1 ? 's' : ''}
+                  </Text>
+                </View>
+              )}
+              {item.isPlannedVisit && (
+                <View style={styles.chip}>
+                  <MaterialCommunityIcons name="calendar-check" size={13} color={COLORS.secondary} />
+                  <Text style={[styles.chipText, { color: COLORS.secondary }]}>Planned</Text>
+                </View>
+              )}
+              {item.isGeofenceBreach && (
+                <View style={[styles.chip, styles.chipWarning]}>
+                  <MaterialCommunityIcons name="map-marker-alert" size={13} color={COLORS.warning} />
+                  <Text style={[styles.chipText, { color: COLORS.warning }]}>Out of Range</Text>
+                </View>
+              )}
+              {!isActive && (
+                <TouchableOpacity
+                  style={styles.deleteBtn}
+                  onPress={() => handleDeleteVisit(item)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <MaterialCommunityIcons name="trash-can-outline" size={16} color={COLORS.error} />
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
         </Card>
       </TouchableOpacity>
@@ -179,7 +249,7 @@ const VisitListScreen: React.FC = () => {
           <View style={styles.activeVisitInfo}>
             <Text style={styles.activeVisitText}>Active Visit</Text>
             <Text style={styles.activeVisitDoctor}>
-              {activeVisit.doctorName || activeVisit.chemistName || 'Visit in progress'}
+              {activeVisit.doctorName || activeVisit.chemistName || activeVisit.stockistName || 'Visit in progress'}
             </Text>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={24} color={COLORS.textWhite} />
@@ -284,6 +354,19 @@ const styles = StyleSheet.create({
   },
   visitCard: {
     marginBottom: SIZES.paddingMD,
+    flexDirection: 'row',
+    overflow: 'hidden',
+    padding: 0,
+  },
+  accentStripe: {
+    width: 4,
+    alignSelf: 'stretch',
+    borderTopLeftRadius: SIZES.radiusMD,
+    borderBottomLeftRadius: SIZES.radiusMD,
+  },
+  cardBody: {
+    flex: 1,
+    padding: SIZES.paddingMD,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -291,21 +374,32 @@ const styles = StyleSheet.create({
     marginBottom: SIZES.paddingSM,
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.primaryLight + '20',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: SIZES.paddingMD,
+    marginRight: SIZES.paddingSM,
   },
   visitInfo: {
     flex: 1,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  visitNumber: {
+    fontSize: SIZES.fontSM,
+    fontWeight: '700',
+    color: COLORS.textDisabled,
+  },
   visitTitle: {
-    fontSize: SIZES.fontLG,
-    fontWeight: '600',
+    fontSize: SIZES.fontMD,
+    fontWeight: '700',
     color: COLORS.textPrimary,
+    flex: 1,
   },
   visitSubtitle: {
     fontSize: SIZES.fontSM,
@@ -315,55 +409,68 @@ const styles = StyleSheet.create({
   visitTime: {
     fontSize: SIZES.fontSM,
     color: COLORS.textSecondary,
-    marginTop: 4,
+    marginTop: 3,
   },
   statusBadge: {
-    paddingHorizontal: SIZES.paddingSM,
+    paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: SIZES.radiusSM,
-    backgroundColor: COLORS.backgroundGray,
-  },
-  statusBadgeActive: {
-    backgroundColor: COLORS.warning + '20',
-  },
-  statusBadgeCompleted: {
-    backgroundColor: COLORS.success + '20',
+    borderRadius: SIZES.radiusRound,
+    alignSelf: 'flex-start',
   },
   statusText: {
     fontSize: SIZES.fontXS,
-    color: COLORS.textSecondary,
-    fontWeight: '600',
-  },
-  statusTextActive: {
-    color: COLORS.warning,
-  },
-  statusTextCompleted: {
-    color: COLORS.success,
+    color: COLORS.textWhite,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   cardFooter: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: SIZES.paddingSM,
+    gap: 6,
+    marginTop: 2,
   },
-  tag: {
+  durationChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SIZES.paddingSM,
-    paddingVertical: 2,
-    backgroundColor: COLORS.info + '20',
-    borderRadius: SIZES.radiusSM,
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    backgroundColor: COLORS.transparent,
+    borderRadius: SIZES.radiusRound,
+    borderWidth: 1,
+    borderColor: COLORS.textSecondary + '60',
   },
-  tagWarning: {
-    backgroundColor: COLORS.warning + '20',
-  },
-  tagText: {
+  durationChipText: {
     fontSize: SIZES.fontXS,
-    color: COLORS.info,
-    marginLeft: 4,
-    fontWeight: '500',
+    color: COLORS.textSecondary,
+    fontWeight: '700',
   },
-  tagTextWarning: {
-    color: COLORS.warning,
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    backgroundColor: COLORS.backgroundGray,
+    borderRadius: SIZES.radiusRound,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  chipOrder: {
+    borderColor: '#7c3aed40',
+    backgroundColor: '#f5f3ff',
+  },
+  deleteBtn: {
+    marginLeft: 'auto',
+    padding: 4,
+  },
+  chipWarning: {
+    borderColor: COLORS.warning + '60',
+    backgroundColor: COLORS.warningLight,
+  },
+  chipText: {
+    fontSize: SIZES.fontXS,
+    fontWeight: '600',
   },
   emptyContainer: {
     flex: 1,

@@ -43,6 +43,9 @@ export interface Visit {
   chemistId?: string;
   chemistName?: string;
   chemistShopName?: string;
+  stockistId?: string;
+  stockistName?: string;
+  stockistCompanyName?: string;
 
   // Visit Details
   visitDateTime: string;
@@ -90,11 +93,13 @@ export interface Visit {
 export interface CreateVisitRequest {
   doctorId?: string;
   chemistId?: string;
+  stockistId?: string;
   visitDateTime: string;
   checkInTime?: string;
   latitude?: number;
   longitude?: number;
   isPlannedVisit: boolean;
+  visitDurationMinutes?: number;
   visitType?: string;
   callType?: string;
   callOutcome?: string;
@@ -147,6 +152,8 @@ export interface CheckOutVisitRequest {
 export interface UpdateVisitRequest {
   checkOutTime?: string;
   visitDurationMinutes?: number;
+  callType?: string;
+  callOutcome?: string;
   productsDiscussed?: string;
   issuesDiscussed?: string;
   feedback?: string;
