@@ -8,3 +8,18 @@
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
 # Add any project specific keep options here:
+
+# ─── React Native core ────────────────────────────────────────────────────────
+-keep class com.facebook.react.** { *; }
+-keep class com.facebook.hermes.** { *; }
+-keep class com.facebook.jni.** { *; }
+
+# ─── Native modules used by this app ─────────────────────────────────────────
+# react-native-geolocation-service
+-keep class com.agontuk.** { *; }
+# @voximplant/react-native-foreground-service
+-keep class com.voximplant.foregroundservice.** { *; }
+# react-native-device-info
+-keep class com.learnium.RNDeviceInfo.** { *; }
+# react-native-permissions
+-keep class com.zoontek.rnpermissions.** { *; }

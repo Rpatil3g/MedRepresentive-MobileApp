@@ -28,3 +28,13 @@ export const doctorSchema = Yup.object().shape({
   address: Yup.string(),
 });
 
+export const chemistSchema = Yup.object().shape({
+  pharmacyName: Yup.string().required('Pharmacy / shop name is required'),
+  chemistName: Yup.string().required('Owner / pharmacist name is required'),
+  mobileNumber: Yup.string()
+    .matches(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number')
+    .required('Mobile number is required'),
+  alternateMobile: Yup.string().matches(/^([0-9]{10})?$/, 'Please enter a valid 10-digit mobile number'),
+  email: Yup.string().email('Please enter a valid email'),
+});
+

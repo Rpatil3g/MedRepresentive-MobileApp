@@ -14,30 +14,28 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import Geolocation from 'react-native-geolocation-service';
 import { Button, Input, Loading, HqRoutePicker } from '../../components/common';
 import { HqRouteValue } from '../../components/common/HqRoutePicker';
-import { doctorApi } from '../../services/api';
-import { CreateDoctorRequest } from '../../types/doctor.types';
+import { chemistApi } from '../../services/api';
+import { CreateChemistRequest } from '../../types/chemist.types';
 import { COLORS, SIZES } from '../../constants';
-import { doctorSchema } from '../../utils/validation';
-import { DOCTOR_TITLE_REGEX, requestLocationPermission, showAlert } from '../../utils/helpers';
+import { chemistSchema } from '../../utils/validation';
+import { requestLocationPermission, showAlert } from '../../utils/helpers';
 
-interface DoctorFormData {
-  doctorName: string;
-  specialty: string;
-  qualification: string | undefined;
-  registrationNumber: string | undefined;
+interface ChemistFormData {
+  pharmacyName: string;
+  chemistName: string;
+  licenseNumber: string | undefined;
   mobileNumber: string;
+  alternateMobile: string | undefined;
   email: string | undefined;
-  clinicName: string | undefined;
   address: string | undefined;
   city: string | undefined;
   state: string | undefined;
   pincode: string | undefined;
-  averagePatientPerDay: string | undefined;
-  bestTimeToVisit: string | undefined;
+  monthlyPotential: string | undefined;
   notes: string | undefined;
 }
 
-const AddDoctorScreen: React.FC = () => {
+const AddChemistScreen: React.FC = () => {
   const navigation = useNavigation();
 
   const [loading, setLoading] = useState(false);
@@ -50,8 +48,8 @@ const AddDoctorScreen: React.FC = () => {
     control,
     handleSubmit,
     formState: { errors },
-  } = useForm<DoctorFormData>({
-    resolver: yupResolver(doctorSchema) as any,
+  } = useForm<ChemistFormData>({
+    resolver: yupResolver(chemistSchema) as any,
   });
 
   useEffect(() => {
@@ -62,7 +60,7 @@ const AddDoctorScreen: React.FC = () => {
     try {
       const hasPermission = await requestLocationPermission();
       if (!hasPermission) {
-        showAlert('Permission Denied', 'Location permission is required to add doctors');
+        showAlert('Permission Denied', 'Location permission is required to add chemists');
         return;
       }
 
@@ -90,57 +88,55 @@ const AddDoctorScreen: React.FC = () => {
 
   const checkDuplicate = async (mobileNumber: string): Promise<boolean> => {
     try {
-      const doctors = await doctorApi.searchDoctors(mobileNumber);
-      return doctors.length > 0;
+      const chemists = await chemistApi.searchChemists(mobileNumber);
+      return chemists.length > 0;
     } catch (error) {
       console.error('Duplicate check error:', error);
       return false;
     }
   };
 
-  const createDoctor = async (data: DoctorFormData) => {
+  const createChemist = async (data: ChemistFormData) => {
     try {
-      const doctorData: CreateDoctorRequest = {
-        doctorName: data.doctorName.replace(DOCTOR_TITLE_REGEX, '').trim(),
-        specialty: data.specialty,
-        qualification: data.qualification,
-        registrationNumber: data.registrationNumber,
+      const chemistData: CreateChemistRequest = {
+        pharmacyName: data.pharmacyName,
+        chemistName: data.chemistName,
+        licenseNumber: data.licenseNumber,
         mobileNumber: data.mobileNumber,
+        alternateMobile: data.alternateMobile || undefined,
         email: data.email,
-        clinicName: data.clinicName,
         address: data.address,
         city: data.city,
         state: data.state,
         pincode: data.pincode,
         latitude: location?.latitude,
         longitude: location?.longitude,
-        averagePatientPerDay: data.averagePatientPerDay
-          ? parseInt(data.averagePatientPerDay, 10)
+        monthlyPotential: data.monthlyPotential
+          ? parseFloat(data.monthlyPotential)
           : undefined,
-        bestTimeToVisit: data.bestTimeToVisit,
         notes: data.notes,
         routeId: hqRoute.routeId,
       };
 
-      await doctorApi.createDoctor(doctorData);
+      await chemistApi.createChemist(chemistData);
 
       showAlert(
         'Submitted for Approval',
-        'Doctor sent to your manager. You can plan visits once it is approved — check My Submissions for status.',
+        'Chemist sent to your manager. You can plan visits once it is approved — check My Submissions for status.',
         () => {
           navigation.goBack();
         },
       );
     } catch (error: any) {
       const errorMessage =
-        error.response?.data?.message || 'Failed to add doctor. Please try again.';
+        error.response?.data?.message || 'Failed to add chemist. Please try again.';
       showAlert('Error', errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
-  const onSubmit: SubmitHandler<DoctorFormData> = async data => {
+  const onSubmit: SubmitHandler<ChemistFormData> = async data => {
     try {
       if (!hqRoute.routeId) {
         setRouteError('Route / Area is required');
@@ -157,20 +153,20 @@ const AddDoctorScreen: React.FC = () => {
       const isDuplicate = await checkDuplicate(data.mobileNumber);
       if (isDuplicate) {
         Alert.alert(
-          'Duplicate Doctor',
-          'A doctor with this mobile number already exists. Do you want to continue?',
+          'Duplicate Chemist',
+          'A chemist with this mobile number already exists. Do you want to continue?',
           [
             { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) },
-            { text: 'Continue', onPress: () => createDoctor(data) },
+            { text: 'Continue', onPress: () => createChemist(data) },
           ]
         );
         return;
       }
 
-      await createDoctor(data);
+      await createChemist(data);
     } catch (error) {
       console.error('Submit error:', error);
-      showAlert('Error', 'Failed to add doctor');
+      showAlert('Error', 'Failed to add chemist');
       setLoading(false);
     }
   };
@@ -206,57 +202,41 @@ const AddDoctorScreen: React.FC = () => {
         <Text style={styles.sectionTitle}>Basic Information</Text>
         <Controller
           control={control}
-          name="doctorName"
+          name="pharmacyName"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Doctor Name *"
-              placeholder="Full name, e.g. Anil Mehta"
-              icon="doctor"
-              prefix="Dr."
-              autoCapitalize="words"
-              value={value}
-              onChangeText={text => onChange(text.replace(DOCTOR_TITLE_REGEX, ''))}
-              onBlur={onBlur}
-              error={errors.doctorName?.message}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="specialty"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Specialty *"
-              placeholder="e.g., Cardiologist, Pediatrician"
-              icon="stethoscope"
+              label="Pharmacy / Shop Name *"
+              placeholder="Enter pharmacy name"
+              icon="store"
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
-              error={errors.specialty?.message}
+              error={errors.pharmacyName?.message}
             />
           )}
         />
         <Controller
           control={control}
-          name="qualification"
+          name="chemistName"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Qualification"
-              placeholder="e.g., MBBS, MD"
-              icon="school"
+              label="Owner / Pharmacist Name *"
+              placeholder="Enter owner's name"
+              icon="account"
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
+              error={errors.chemistName?.message}
             />
           )}
         />
         <Controller
           control={control}
-          name="registrationNumber"
+          name="licenseNumber"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Registration Number"
-              placeholder="Medical registration number"
+              label="Drug License Number"
+              placeholder="License number"
               icon="card-account-details"
               value={value}
               onChangeText={onChange}
@@ -292,11 +272,28 @@ const AddDoctorScreen: React.FC = () => {
         />
         <Controller
           control={control}
+          name="alternateMobile"
+          render={({ field: { onChange, onBlur, value } }) => (
+            <Input
+              label="Alternate Mobile"
+              placeholder="10-digit mobile number"
+              icon="phone-plus"
+              keyboardType="phone-pad"
+              maxLength={10}
+              value={value}
+              onChangeText={onChange}
+              onBlur={onBlur}
+              error={errors.alternateMobile?.message}
+            />
+          )}
+        />
+        <Controller
+          control={control}
           name="email"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
               label="Email"
-              placeholder="doctor@example.com"
+              placeholder="chemist@example.com"
               icon="email"
               keyboardType="email-address"
               autoCapitalize="none"
@@ -308,28 +305,14 @@ const AddDoctorScreen: React.FC = () => {
           )}
         />
 
-        <Text style={styles.sectionTitle}>Clinic Information</Text>
-        <Controller
-          control={control}
-          name="clinicName"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Clinic Name"
-              placeholder="Enter clinic/hospital name"
-              icon="hospital-building"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
+        <Text style={styles.sectionTitle}>Address</Text>
         <Controller
           control={control}
           name="address"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
               label="Address"
-              placeholder="Clinic address"
+              placeholder="Shop address"
               icon="map-marker"
               multiline
               numberOfLines={3}
@@ -387,27 +370,13 @@ const AddDoctorScreen: React.FC = () => {
         <Text style={styles.sectionTitle}>Additional Information</Text>
         <Controller
           control={control}
-          name="averagePatientPerDay"
+          name="monthlyPotential"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Average Patients Per Day"
-              placeholder="e.g., 50"
-              icon="account-group"
+              label="Monthly Potential (₹)"
+              placeholder="e.g., 50000"
+              icon="currency-inr"
               keyboardType="numeric"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="bestTimeToVisit"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Best Time to Visit"
-              placeholder="e.g., 10:00 AM - 12:00 PM"
-              icon="clock"
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
@@ -432,7 +401,7 @@ const AddDoctorScreen: React.FC = () => {
         />
 
         <Button
-          title="Add Doctor"
+          title="Add Chemist"
           onPress={handleSubmit(onSubmit)}
           loading={loading}
           disabled={!location}
@@ -440,7 +409,7 @@ const AddDoctorScreen: React.FC = () => {
         />
       </ScrollView>
 
-      <Loading visible={loading} message="Adding doctor..." />
+      <Loading visible={loading} message="Adding chemist..." />
     </KeyboardAvoidingView>
   );
 };
@@ -483,5 +452,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AddDoctorScreen;
-
+export default AddChemistScreen;

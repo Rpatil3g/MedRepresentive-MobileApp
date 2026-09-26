@@ -54,6 +54,14 @@ class DoctorApi {
     return normalizeDoctor(unwrapResponse(response.data));
   }
 
+  // Doctors this MR added, with their approval status (PENDING / APPROVED / REJECTED)
+  async getMySubmissions(): Promise<Doctor[]> {
+    const response = await axiosInstance.get<Doctor[] | { data?: Doctor[] }>(
+      API_CONFIG.ENDPOINTS.DOCTORS_MY_SUBMISSIONS
+    );
+    return unwrapResponse(response.data).map(normalizeDoctor);
+  }
+
   async searchDoctors(query: string): Promise<Doctor[]> {
     const response = await axiosInstance.get<Doctor[] | { data?: Doctor[] }>(
       `${API_CONFIG.ENDPOINTS.DOCTORS_SEARCH}/${encodeURIComponent(query)}`
@@ -77,12 +85,6 @@ class DoctorApi {
     return unwrapResponse(response.data).map(normalizeDoctor);
   }
 
-  async getDoctorsByTerritory(territoryId: string): Promise<Doctor[]> {
-    const response = await axiosInstance.get<Doctor[] | { data?: Doctor[] }>(
-      `${API_CONFIG.ENDPOINTS.DOCTORS_BY_TERRITORY}/${territoryId}`
-    );
-    return unwrapResponse(response.data).map(normalizeDoctor);
-  }
 
   async createDoctor(data: CreateDoctorRequest): Promise<Doctor> {
     const response = await axiosInstance.post<Doctor | { data?: Doctor }>(

@@ -17,6 +17,8 @@ interface InputProps extends TextInputProps {
   icon?: string;
   secureTextEntry?: boolean;
   containerStyle?: ViewStyle;
+  /** Fixed text shown before the typed value, e.g. "Dr." — not part of the value */
+  prefix?: string;
 }
 
 const Input: React.FC<InputProps> = ({
@@ -25,6 +27,7 @@ const Input: React.FC<InputProps> = ({
   icon,
   secureTextEntry,
   containerStyle,
+  prefix,
   ...props
 }) => {
   const [isFocused, setIsFocused] = useState(false);
@@ -50,9 +53,16 @@ const Input: React.FC<InputProps> = ({
           />
         )}
 
+        {prefix ? <Text style={styles.prefix}>{prefix}</Text> : null}
+
         <TextInput
           style={styles.input}
           placeholderTextColor={COLORS.textDisabled}
+          // Android autofill guesses unlabelled fields are all "name" and fills them with one value;
+          // opt out by default — screens that want autofill (login) override these
+          autoComplete="off"
+          importantForAutofill="no"
+          textContentType="none"
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           secureTextEntry={secureTextEntry && !isPasswordVisible}
@@ -106,6 +116,12 @@ const styles = StyleSheet.create({
   },
   icon: {
     marginRight: SIZES.paddingSM,
+  },
+  prefix: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginRight: SIZES.paddingXS,
   },
   input: {
     flex: 1,

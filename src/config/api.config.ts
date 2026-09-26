@@ -1,8 +1,8 @@
 import { API_BASE_URL, API_PREFIX, API_TIMEOUT } from '@env';
 
 export const API_CONFIG = {
-  BASE_URL: API_BASE_URL || 'https://localhost:7177',
-  PREFIX: API_PREFIX || '/api',
+  BASE_URL: API_BASE_URL,
+  PREFIX: API_PREFIX || '/api/v1',
   TIMEOUT: parseInt(API_TIMEOUT || '30000', 10),
   
   // API Endpoints
@@ -17,19 +17,17 @@ export const API_CONFIG = {
     // Doctors
     DOCTORS: '/doctors',
     DOCTORS_SEARCH: '/doctors/search',
+    DOCTORS_MY_SUBMISSIONS: '/doctors/my-submissions',
     DOCTORS_NEARBY: '/doctors/nearby',
-    DOCTORS_BY_TERRITORY: '/doctors/by-territory',
 
     // Chemists
     CHEMISTS: '/chemists',
     CHEMISTS_SEARCH: '/chemists/search',
+    CHEMISTS_MY_SUBMISSIONS: '/chemists/my-submissions',
 
     // Stockists
     STOCKISTS: '/stockists',
 
-    // Territories
-    TERRITORIES: '/territories',
-    TERRITORIES_MY_TERRITORIES: '/territories/my-territories',
     
     // Visits
     VISITS: '/visits',
@@ -60,7 +58,6 @@ export const API_CONFIG = {
     // Profile
     MEDICAL_REPS: '/medicalreps',
     MEDICAL_REPS_BY_USER: '/medicalreps/by-user',
-    MEDICAL_REPS_TERRITORIES: '/medicalreps/{mrId}/territories',
     
     // Attendance
     ATTENDANCE: '/attendance',
@@ -70,6 +67,9 @@ export const API_CONFIG = {
 
     // Routes (for MTP day form dropdown)
     ROUTES: '/routes',
+
+    // Headquarters (for MTP day form HQ/Location dropdown)
+    HEADQUARTERS: '/headquarters',
 
     // Products
     PRODUCTS: '/products',

@@ -1,3 +1,6 @@
+// Doctors/chemists added by an MR stay PENDING until their manager approves them
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
 export interface Doctor {
   id: string;
   doctorName: string;
@@ -17,13 +20,12 @@ export interface Doctor {
   averagePatientPerDay?: number;
   bestTimeToVisit?: string;
   notes?: string;
-  territoryId?: string;
-  territoryName?: string;
-  territoryCode?: string;
   latitude?: number;
   longitude?: number;
   geoLocation?: GeoLocation;
   isActive: boolean;
+  approvalStatus?: ApprovalStatus;
+  rejectionReason?: string;
   totalVisits?: number;
   lastVisitDate?: string;
   createdAt: string;
@@ -38,7 +40,6 @@ export interface GeoLocation {
 export interface CreateDoctorRequest {
   doctorName: string;
   routeId?: string;
-  territoryId?: string;
   qualification?: string;
   specialty?: string;
   category?: string;
@@ -59,7 +60,6 @@ export interface CreateDoctorRequest {
 
 export interface DoctorListRequest {
   routeId?: string;
-  territoryId?: string;
   city?: string;
   state?: string;
   specialty?: string;

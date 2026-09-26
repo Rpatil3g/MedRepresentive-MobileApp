@@ -16,6 +16,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { useAppDispatch } from '../../store/hooks';
 import { addDCR, updateDCR as updateDCRAction } from '../../store/slices/dcrSlice';
 import { dcrApi, visitApi, attendanceApi, expenseApi } from '../../services/api';
+import { Expense } from '../../types/expense.types';
 import { CreateDCRRequest, DailyCallReport } from '../../types/dcr.types';
 import { Visit } from '../../types/visit.types';
 import { AttendanceRecord } from '../../types/attendance.types';
@@ -26,6 +27,12 @@ import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { Loading } from '../../components/common';
 
 type CreateDCRRouteProp = RouteProp<DCRStackParamList, 'CreateDCR'>;
+
+const CATEGORY_META: Record<string, { icon: string; color: string }> = {
+  Travel: { icon: 'car-outline',      color: '#ea580c' },
+  Food:   { icon: 'food-outline',     color: '#16a34a' },
+  Other:  { icon: 'dots-horizontal',  color: '#7c3aed' },
+};
 
 const CreateDCRScreen: React.FC = () => {
   const navigation = useNavigation();
@@ -39,41 +46,42 @@ const CreateDCRScreen: React.FC = () => {
   const [attendance, setAttendance] = useState<AttendanceRecord | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [existingDraft, setExistingDraft] = useState<DailyCallReport | null>(null);
+  const [dayExpenses, setDayExpenses] = useState<Expense[]>([]);
 
   // Form fields
   const [endLocation, setEndLocation] = useState('');
   const [locating, setLocating] = useState(false);
   const [remarks, setRemarks] = useState('');
-  const [travelExpense, setTravelExpense] = useState('');
-  const [daExpense, setDaExpense] = useState('');
-  const [otherExpense, setOtherExpense] = useState('');
 
   const fetchData = async () => {
     try {
       const isToday = reportDate === getTodayDate();
-      const [visitsResponse, fetchedAttendance, existingDraft] = await Promise.all([
+      const dateStr = reportDate.split('T')[0];
+
+      const [visitsResponse, fetchedAttendance, existingDCR, allExpenses] = await Promise.all([
         isToday
           ? visitApi.getTodayVisits()
-          : visitApi.getVisits({ fromDate: reportDate, toDate: `${reportDate.split('T')[0]}T23:59:59` })
+          : visitApi.getVisits({ fromDate: reportDate, toDate: `${dateStr}T23:59:59` })
               .then(r => (Array.isArray(r) ? r : r.items ?? [])),
         isToday
           ? attendanceApi.getTodayAttendance()
           : attendanceApi.getAttendanceByDate(reportDate).catch(() => null),
         dcrApi.getDCRByDate(reportDate),
+        expenseApi.getMyExpenses({ date: dateStr }).catch(() => [] as Expense[]),
       ]);
+
       setVisits(visitsResponse as Visit[]);
       setAttendance(fetchedAttendance);
-      setExistingDraft(existingDraft);
+      setExistingDraft(existingDCR);
+      setDayExpenses(allExpenses.filter(e => e.expenseDate.startsWith(dateStr)));
 
-      if (existingDraft) {
-        if (existingDraft.endLocation) setEndLocation(existingDraft.endLocation);
-        if (existingDraft.remarks)     setRemarks(existingDraft.remarks);
-        if (existingDraft.travelExpense != null) setTravelExpense(String(existingDraft.travelExpense));
-        if (existingDraft.daExpense    != null) setDaExpense(String(existingDraft.daExpense));
-        if (existingDraft.otherExpense != null) setOtherExpense(String(existingDraft.otherExpense));
+      if (existingDCR) {
+        if (existingDCR.endLocation) setEndLocation(existingDCR.endLocation);
+        if (existingDCR.remarks)     setRemarks(existingDCR.remarks);
       }
     } catch (error) {
       console.error('Fetch data error:', error);
+      showAlert('Error', 'Failed to load DCR data. Please go back and try again.');
     }
   };
 
@@ -104,11 +112,21 @@ const CreateDCRScreen: React.FC = () => {
   const isReadOnly =
     existingDraft?.status === 'Submitted' || existingDraft?.status === 'Approved';
 
-  // ── Expense total ─────────────────────────────────────────────────────────
-  const travel = parseFloat(travelExpense) || 0;
-  const da = parseFloat(daExpense) || 0;
-  const other = parseFloat(otherExpense) || 0;
-  const totalExpense = travel + da + other;
+  // ── Duplicate doctor visit guard ──────────────────────────────────────────
+  const duplicateDoctorNames: string[] = React.useMemo(() => {
+    const doctorVisits = visits.filter(v => v.visitType === 'Doctor' && v.doctorId);
+    const seen = new Map<string, string>();
+    const dupes = new Set<string>();
+    for (const v of doctorVisits) {
+      if (seen.has(v.doctorId!)) dupes.add(seen.get(v.doctorId!)!);
+      else seen.set(v.doctorId!, v.doctorName || v.doctorId!);
+    }
+    return Array.from(dupes);
+  }, [visits]);
+  const hasDuplicateDoctors = duplicateDoctorNames.length > 0;
+
+  // ── Expense summary ───────────────────────────────────────────────────────
+  const expenseTotal = dayExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const handleLocate = async () => {
     const ok = await requestLocationPermission();
@@ -148,6 +166,15 @@ const CreateDCRScreen: React.FC = () => {
       return;
     }
 
+    if (existingDraft?.status === 'Submitted') {
+      showAlert('Already Submitted', 'The DCR for today has already been submitted for approval.');
+      return;
+    }
+    if (existingDraft?.status === 'Approved') {
+      showAlert('Already Approved', 'The DCR for today has already been approved.');
+      return;
+    }
+
     try {
       setSubmitting(true);
 
@@ -160,24 +187,8 @@ const CreateDCRScreen: React.FC = () => {
         startLocation: attendance?.punchInAddress || undefined,
         endLocation: endLocation.trim() || undefined,
         remarks: remarks.trim() || undefined,
-        travelExpense: travel > 0 ? travel : undefined,
-        daExpense:     da     > 0 ? da     : undefined,
-        otherExpense:  other  > 0 ? other  : undefined,
       };
 
-      // Guard against non-editable states (uses value already fetched on screen load)
-      if (existingDraft) {
-        if (existingDraft.status === 'Submitted') {
-          showAlert('Already Submitted', 'The DCR for today has already been submitted for approval.');
-          return;
-        }
-        if (existingDraft.status === 'Approved') {
-          showAlert('Already Approved', 'The DCR for today has already been approved.');
-          return;
-        }
-      }
-
-      // Create or update depending on whether a draft already exists
       const savedDCR = existingDraft
         ? await dcrApi.updateDCR(existingDraft.id, dcrData)
         : await dcrApi.createDCR(dcrData);
@@ -185,43 +196,7 @@ const CreateDCRScreen: React.FC = () => {
       dispatch(existingDraft ? updateDCRAction(savedDCR) : addDCR(savedDCR));
 
       if (!isDraft) {
-        // Submit for approval
         await dcrApi.submitDCR(savedDCR.id);
-
-        // Create expense entries (best-effort, non-blocking)
-        const expenseDate = reportDate;
-        const expensePromises = [];
-        if (travel > 0) {
-          expensePromises.push(
-            expenseApi.createExpense({
-              expenseDate,
-              category: 'Travel',
-              amount: travel,
-              description: 'Daily travel expense',
-            })
-          );
-        }
-        if (da > 0) {
-          expensePromises.push(
-            expenseApi.createExpense({
-              expenseDate,
-              category: 'Food',
-              amount: da,
-              description: 'Daily allowance (DA)',
-            })
-          );
-        }
-        if (other > 0) {
-          expensePromises.push(
-            expenseApi.createExpense({
-              expenseDate,
-              category: 'Other',
-              amount: other,
-              description: 'Other daily expense',
-            })
-          );
-        }
-        await Promise.allSettled(expensePromises);
       }
 
       showAlert(
@@ -269,6 +244,19 @@ const CreateDCRScreen: React.FC = () => {
                 {existingDraft?.status === 'Approved' ? 'DCR Approved' : 'DCR Submitted for Approval'}
               </Text>
               <Text style={styles.statusBannerSub}>This report is locked and cannot be edited.</Text>
+            </View>
+          </View>
+        )}
+
+        {/* ── Duplicate doctor warning ─────────────────────────────────────── */}
+        {hasDuplicateDoctors && !isReadOnly && (
+          <View style={styles.duplicateWarning}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={20} color={COLORS.error} />
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={styles.duplicateWarningTitle}>Duplicate Doctor Visit Detected</Text>
+              <Text style={styles.duplicateWarningSub}>
+                {duplicateDoctorNames.join(', ')} {duplicateDoctorNames.length === 1 ? 'has' : 'have'} been visited more than once today. Remove the duplicate visit before submitting.
+              </Text>
             </View>
           </View>
         )}
@@ -384,9 +372,7 @@ const CreateDCRScreen: React.FC = () => {
 
           <View style={styles.promoRow}>
             <Text style={styles.promoLabel}>Total POB Value</Text>
-            <Text style={styles.promoValue}>
-              ₹ {totalPOB.toLocaleString('en-IN')}
-            </Text>
+            <Text style={styles.promoValue}>₹ {totalPOB.toLocaleString('en-IN')}</Text>
           </View>
           <View style={styles.promoRow}>
             <Text style={styles.promoLabel}>Total Samples Given</Text>
@@ -394,64 +380,49 @@ const CreateDCRScreen: React.FC = () => {
           </View>
         </View>
 
-        {/* ── SECTION 4: Daily Expenses ────────────────────────────────────── */}
+        {/* ── SECTION 4: Expenses Summary ──────────────────────────────────── */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Daily Expenses</Text>
-
-          <View style={styles.expenseRow}>
-            <Text style={styles.expenseLabel}>Travel Expense</Text>
-            <View style={styles.expenseInputBox}>
-              <Text style={styles.currency}>₹</Text>
-              <TextInput
-                style={styles.expenseInput}
-                value={travelExpense}
-                onChangeText={setTravelExpense}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={COLORS.textDisabled}
-                editable={!isReadOnly}
-              />
-            </View>
+          <View style={styles.cardTitleRow}>
+            <Text style={styles.cardTitle}>Expenses</Text>
+            <TouchableOpacity
+              style={styles.manageBtn}
+              onPress={() => (navigation as any).navigate('Expenses', {
+                screen: 'ExpenseList',
+                params: { date: reportDate.split('T')[0] },
+              })}
+            >
+              <MaterialCommunityIcons name="plus" size={14} color={COLORS.primary} />
+              <Text style={styles.manageBtnText}>
+                {dayExpenses.length === 0 ? 'Add Expense' : 'Manage'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
-          <View style={styles.expenseRow}>
-            <Text style={styles.expenseLabel}>DA / Food</Text>
-            <View style={styles.expenseInputBox}>
-              <Text style={styles.currency}>₹</Text>
-              <TextInput
-                style={styles.expenseInput}
-                value={daExpense}
-                onChangeText={setDaExpense}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={COLORS.textDisabled}
-                editable={!isReadOnly}
-              />
-            </View>
-          </View>
-
-          <View style={styles.expenseRow}>
-            <Text style={styles.expenseLabel}>Other Expense</Text>
-            <View style={styles.expenseInputBox}>
-              <Text style={styles.currency}>₹</Text>
-              <TextInput
-                style={styles.expenseInput}
-                value={otherExpense}
-                onChangeText={setOtherExpense}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={COLORS.textDisabled}
-                editable={!isReadOnly}
-              />
-            </View>
-          </View>
-
-          <View style={styles.expenseTotalRow}>
-            <Text style={styles.expenseTotalLabel}>Total Expense</Text>
-            <Text style={styles.expenseTotalValue}>
-              ₹ {totalExpense.toLocaleString('en-IN')}
-            </Text>
-          </View>
+          {dayExpenses.length === 0 ? (
+            <Text style={styles.noExpenseText}>No expenses logged for this date.</Text>
+          ) : (
+            <>
+              {dayExpenses.map(expense => {
+                const meta = CATEGORY_META[expense.category] ?? CATEGORY_META.Other;
+                return (
+                  <View key={expense.id} style={styles.expenseSummaryRow}>
+                    <MaterialCommunityIcons name={meta.icon} size={16} color={meta.color} />
+                    <Text style={styles.expenseSummaryCategory}>{expense.category}</Text>
+                    <Text style={styles.expenseSummaryAmount}>
+                      ₹ {expense.amount.toLocaleString('en-IN')}
+                    </Text>
+                    {expense.receiptUrl ? (
+                      <MaterialCommunityIcons name="paperclip" size={13} color={COLORS.textSecondary} />
+                    ) : null}
+                  </View>
+                );
+              })}
+              <View style={styles.expenseTotalRow}>
+                <Text style={styles.expenseTotalLabel}>Total</Text>
+                <Text style={styles.expenseTotalValue}>₹ {expenseTotal.toLocaleString('en-IN')}</Text>
+              </View>
+            </>
+          )}
         </View>
 
         {/* ── SECTION 5: Daily Remarks ─────────────────────────────────────── */}
@@ -533,9 +504,9 @@ const CreateDCRScreen: React.FC = () => {
         ) : (
           <>
             <TouchableOpacity
-              style={[styles.submitBtn, submitting && styles.btnDisabled]}
+              style={[styles.submitBtn, (submitting || hasDuplicateDoctors) && styles.btnDisabled]}
               onPress={() => handleSubmit(false)}
-              disabled={submitting}
+              disabled={submitting || hasDuplicateDoctors}
             >
               <Text style={styles.submitBtnText}>Submit Final DCR</Text>
             </TouchableOpacity>
@@ -729,41 +700,45 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
 
-  // ── Expenses ─────────────────────────────────────────────────────────────
-  expenseRow: {
+  // ── Expense Summary ───────────────────────────────────────────────────────
+  manageBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: SIZES.paddingSM + 2,
-  },
-  expenseLabel: {
-    fontSize: SIZES.fontSM,
-    fontWeight: '500',
-    color: COLORS.textPrimary,
-    flex: 1,
-  },
-  expenseInputBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.primary,
     borderRadius: SIZES.radiusSM,
     paddingHorizontal: SIZES.paddingSM,
-    paddingVertical: 5,
-    width: 120,
+    paddingVertical: 3,
+    gap: 2,
   },
-  currency: {
+  manageBtnText: {
+    fontSize: SIZES.fontXS,
+    fontWeight: '600',
+    color: COLORS.primary,
+    marginLeft: 2,
+  },
+  noExpenseText: {
     fontSize: SIZES.fontSM,
-    color: COLORS.textSecondary,
-    marginRight: 4,
+    color: COLORS.textDisabled,
+    textAlign: 'center',
+    paddingVertical: SIZES.paddingSM,
   },
-  expenseInput: {
+  expenseSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SIZES.paddingXS + 2,
+    gap: 8,
+  },
+  expenseSummaryCategory: {
     flex: 1,
-    fontSize: SIZES.fontMD,
+    fontSize: SIZES.fontSM,
+    color: COLORS.textPrimary,
+    fontWeight: '500',
+  },
+  expenseSummaryAmount: {
+    fontSize: SIZES.fontSM,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    padding: 0,
   },
   expenseTotalRow: {
     flexDirection: 'row',
@@ -919,6 +894,30 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontMD,
     fontWeight: '600',
     color: COLORS.primary,
+  },
+
+  // ── Duplicate doctor warning ─────────────────────────────────────────────
+  duplicateWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#fef2f2',
+    borderRadius: SIZES.radiusMD,
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: SIZES.paddingMD,
+    marginBottom: SIZES.paddingMD,
+  },
+  duplicateWarningTitle: {
+    fontSize: SIZES.fontSM,
+    fontWeight: '700',
+    color: COLORS.error,
+    marginBottom: 2,
+  },
+  duplicateWarningSub: {
+    fontSize: SIZES.fontXS,
+    color: COLORS.error,
+    lineHeight: 16,
   },
 
   // ── Status banner ─────────────────────────────────────────────────────────

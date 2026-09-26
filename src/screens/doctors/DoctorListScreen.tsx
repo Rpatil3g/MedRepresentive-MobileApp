@@ -8,6 +8,8 @@ import {
   TextInput,
   RefreshControl,
   ActivityIndicator,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,7 +27,7 @@ import { doctorApi } from '../../services/api';
 import { Doctor } from '../../types/doctor.types';
 import { DoctorStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES, ROUTES } from '../../constants';
-import { truncateText } from '../../utils/helpers';
+import { formatDoctorName, truncateText } from '../../utils/helpers';
 
 type DoctorListNavigationProp = StackNavigationProp<DoctorStackParamList, 'DoctorList'>;
 
@@ -112,9 +114,33 @@ const DoctorListScreen: React.FC = () => {
     navigation.navigate(ROUTES.DOCTOR_DETAIL, { doctorId: doctor.id });
   };
 
-  const handleAddDoctor = () => {
-    navigation.navigate(ROUTES.ADD_DOCTOR);
+  const [addSheetVisible, setAddSheetVisible] = useState(false);
+
+  const handleAddDoctor = () => setAddSheetVisible(true);
+
+  const openAddScreen = (route: typeof ROUTES.ADD_DOCTOR | typeof ROUTES.ADD_CHEMIST) => {
+    setAddSheetVisible(false);
+    navigation.navigate(route);
   };
+
+  const ADD_OPTIONS = [
+    {
+      route: ROUTES.ADD_DOCTOR,
+      icon: 'doctor',
+      title: 'Add Doctor',
+      subtitle: 'Clinic or hospital doctor on your route',
+      color: COLORS.primary,
+      bg: COLORS.primaryLight,
+    },
+    {
+      route: ROUTES.ADD_CHEMIST,
+      icon: 'store-plus-outline',
+      title: 'Add Chemist',
+      subtitle: 'Pharmacy or medical store on your route',
+      color: '#059669',
+      bg: '#d1fae5',
+    },
+  ] as const;
 
   const renderDoctorCard = ({ item }: { item: Doctor }) => (
     <TouchableOpacity onPress={() => handleDoctorPress(item)} activeOpacity={0.7}>
@@ -124,7 +150,7 @@ const DoctorListScreen: React.FC = () => {
             <MaterialCommunityIcons name="doctor" size={32} color={COLORS.primary} />
           </View>
           <View style={styles.doctorInfo}>
-            <Text style={styles.doctorName}>{item.doctorName}</Text>
+            <Text style={styles.doctorName}>{formatDoctorName(item.doctorName)}</Text>
             {item.specialty ? <Text style={styles.specialty}>{item.specialty}</Text> : null}
             {item.clinicName ? (
               <Text style={styles.clinicName} numberOfLines={1}>
@@ -220,6 +246,16 @@ const DoctorListScreen: React.FC = () => {
         </View>
       </View>
 
+      <TouchableOpacity
+        style={styles.submissionsLink}
+        onPress={() => navigation.navigate(ROUTES.MY_SUBMISSIONS)}
+        activeOpacity={0.7}
+      >
+        <MaterialCommunityIcons name="clipboard-clock-outline" size={18} color={COLORS.primary} />
+        <Text style={styles.submissionsLinkText}>My submissions & approval status</Text>
+        <MaterialCommunityIcons name="chevron-right" size={18} color={COLORS.primary} />
+      </TouchableOpacity>
+
       {!loading && doctors.length > 0 ? (
         <View style={styles.resultContainer}>
           <Text style={styles.resultText}>
@@ -243,6 +279,43 @@ const DoctorListScreen: React.FC = () => {
       <TouchableOpacity style={styles.fab} onPress={handleAddDoctor}>
         <MaterialCommunityIcons name="plus" size={28} color={COLORS.textWhite} />
       </TouchableOpacity>
+
+      <Modal
+        visible={addSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setAddSheetVisible(false)}
+      >
+        <Pressable style={styles.sheetOverlay} onPress={() => setAddSheetVisible(false)}>
+          <Pressable style={styles.sheet} onPress={() => undefined}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>What would you like to add?</Text>
+            <Text style={styles.sheetSubtitle}>New entries are sent to your manager for approval.</Text>
+
+            {ADD_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.route}
+                style={styles.sheetOption}
+                onPress={() => openAddScreen(option.route)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.sheetOptionIcon, { backgroundColor: option.bg }]}>
+                  <MaterialCommunityIcons name={option.icon} size={26} color={option.color} />
+                </View>
+                <View style={styles.sheetOptionText}>
+                  <Text style={styles.sheetOptionTitle}>{option.title}</Text>
+                  <Text style={styles.sheetOptionSubtitle}>{option.subtitle}</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.textSecondary} />
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity style={styles.sheetCancel} onPress={() => setAddSheetVisible(false)}>
+              <Text style={styles.sheetCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Loading visible={loading && !refreshing} message="Loading doctors..." />
     </View>
@@ -275,6 +348,92 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: SIZES.fontMD,
     color: COLORS.textPrimary,
+  },
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  sheet: {
+    backgroundColor: COLORS.background,
+    borderTopLeftRadius: SIZES.radiusLG,
+    borderTopRightRadius: SIZES.radiusLG,
+    paddingHorizontal: SIZES.paddingLG,
+    paddingTop: SIZES.paddingSM,
+    paddingBottom: SIZES.paddingXL,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.border,
+    marginBottom: SIZES.paddingMD,
+  },
+  sheetTitle: {
+    fontSize: SIZES.fontLG,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  sheetSubtitle: {
+    fontSize: SIZES.fontSM,
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    marginBottom: SIZES.paddingMD,
+  },
+  sheetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SIZES.paddingMD,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: SIZES.radiusMD,
+    marginBottom: SIZES.paddingSM,
+  },
+  sheetOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetOptionText: {
+    flex: 1,
+    marginLeft: SIZES.paddingMD,
+  },
+  sheetOptionTitle: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  sheetOptionSubtitle: {
+    fontSize: SIZES.fontSM,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  sheetCancel: {
+    alignItems: 'center',
+    paddingVertical: SIZES.paddingMD,
+    marginTop: SIZES.paddingXS,
+  },
+  sheetCancelText: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  submissionsLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SIZES.paddingSM,
+    backgroundColor: COLORS.primaryLight,
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: SIZES.paddingSM,
+  },
+  submissionsLinkText: {
+    flex: 1,
+    fontSize: SIZES.fontSM,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   resultContainer: {
     backgroundColor: COLORS.background,

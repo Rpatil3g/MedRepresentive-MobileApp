@@ -6,3 +6,4 @@ export { default as dcrReducer } from './dcrSlice';
 export { default as taskReducer } from './taskSlice';
 export { default as attendanceReducer } from './attendanceSlice';
 export { default as tourPlanReducer } from './tourPlanSlice';
+export { default as expenseReducer } from './expenseSlice';

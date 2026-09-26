@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, View, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createStackNavigator } from '@react-navigation/stack';
 import { useAppSelector } from '../store/hooks';
@@ -12,6 +13,7 @@ import {
   MoreStackParamList,
   AttendanceStackParamList,
   TourPlanStackParamList,
+  ExpenseStackParamList,
 } from '../types/navigation.types';
 import { ROUTES } from '../constants/routes';
 import { COLORS } from '../constants/colors';
@@ -24,6 +26,8 @@ import DashboardScreen from '../screens/home/DashboardScreen';
 import DoctorListScreen from '../screens/doctors/DoctorListScreen';
 import DoctorDetailScreen from '../screens/doctors/DoctorDetailScreen';
 import AddDoctorScreen from '../screens/doctors/AddDoctorScreen';
+import AddChemistScreen from '../screens/doctors/AddChemistScreen';
+import MySubmissionsScreen from '../screens/doctors/MySubmissionsScreen';
 
 // Visit Screens
 import { VisitListScreen, LogVisitScreen, VisitDetailScreen, VisitEditScreen } from '../screens/visits';
@@ -48,6 +52,11 @@ import { ProductListScreen, ProductDetailScreen } from '../screens/products';
 
 // Auth screens used in More stack
 import ChangePasswordScreen from '../screens/auth/ChangePasswordScreen';
+import HelpSupportScreen from '../screens/more/HelpSupportScreen';
+import AboutScreen from '../screens/more/AboutScreen';
+
+// Expense Screens
+import { ExpenseListScreen, AddExpenseScreen, EditExpenseScreen } from '../screens/expenses';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 const DoctorStack = createStackNavigator<DoctorStackParamList>();
@@ -57,6 +66,7 @@ const DCRStack = createStackNavigator<DCRStackParamList>();
 const MoreStack = createStackNavigator<MoreStackParamList>();
 const AttendanceStack = createStackNavigator<AttendanceStackParamList>();
 const TourPlanStack = createStackNavigator<TourPlanStackParamList>();
+const ExpenseStack = createStackNavigator<ExpenseStackParamList>();
 
 const headerOptions = {
   headerShown: true,
@@ -64,6 +74,7 @@ const headerOptions = {
     backgroundColor: COLORS.primary,
   },
   headerTintColor: COLORS.textWhite,
+  headerTitleAlign: 'left' as const,
   headerTitleStyle: {
     fontWeight: '600' as const,
   },
@@ -86,6 +97,16 @@ const DoctorStackNavigator: React.FC = () => (
       component={AddDoctorScreen}
       options={{ title: 'Add New Doctor' }}
     />
+    <DoctorStack.Screen
+      name={ROUTES.ADD_CHEMIST}
+      component={AddChemistScreen}
+      options={{ title: 'Add New Chemist' }}
+    />
+    <DoctorStack.Screen
+      name={ROUTES.MY_SUBMISSIONS}
+      component={MySubmissionsScreen}
+      options={{ title: 'My Submissions' }}
+    />
   </DoctorStack.Navigator>
 );
 
@@ -99,7 +120,7 @@ const ProductStackNavigator: React.FC = () => (
     <ProductStack.Screen
       name="ProductDetail"
       component={ProductDetailScreen}
-      options={{ title: 'Product Details' }}
+      options={{ title: 'Product Details', headerTitleAlign: 'left' }}
     />
   </ProductStack.Navigator>
 );
@@ -234,7 +255,37 @@ const MoreStackNavigator: React.FC = () => (
       component={ChangePasswordScreen}
       options={{ title: 'Change Password' }}
     />
+    <MoreStack.Screen
+      name="HelpSupport"
+      component={HelpSupportScreen}
+      options={{ title: 'Help & Support' }}
+    />
+    <MoreStack.Screen
+      name="About"
+      component={AboutScreen}
+      options={{ title: 'About' }}
+    />
   </MoreStack.Navigator>
+);
+
+const ExpenseStackNavigator: React.FC = () => (
+  <ExpenseStack.Navigator screenOptions={headerOptions}>
+    <ExpenseStack.Screen
+      name="ExpenseList"
+      component={ExpenseListScreen}
+      options={{ title: 'My Expenses' }}
+    />
+    <ExpenseStack.Screen
+      name="AddExpense"
+      component={AddExpenseScreen}
+      options={{ title: 'Add Expense' }}
+    />
+    <ExpenseStack.Screen
+      name="EditExpense"
+      component={EditExpenseScreen}
+      options={{ title: 'Edit & Resubmit' }}
+    />
+  </ExpenseStack.Navigator>
 );
 
 const DCRTabIcon: React.FC<{ color: string; size: number }> = ({ color, size }) => {
@@ -249,6 +300,8 @@ const DCRTabIcon: React.FC<{ color: string; size: number }> = ({ color, size }) 
 };
 
 const MainNavigator: React.FC = () => {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -262,8 +315,8 @@ const MainNavigator: React.FC = () => {
           shadowOffset: { width: 0, height: -4 },
           shadowOpacity: 0.08,
           shadowRadius: 10,
-          height: 64,
-          paddingBottom: 10,
+          height: 64 + insets.bottom,
+          paddingBottom: 10 + insets.bottom,
           paddingTop: 8,
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
@@ -354,6 +407,15 @@ const MainNavigator: React.FC = () => {
       <Tab.Screen
         name={ROUTES.DOCTORS}
         component={DoctorStackNavigator}
+        options={{
+          tabBarItemStyle: { display: 'none' },
+          tabBarButton: () => null,
+        }}
+      />
+
+      <Tab.Screen
+        name={ROUTES.EXPENSES}
+        component={ExpenseStackNavigator}
         options={{
           tabBarItemStyle: { display: 'none' },
           tabBarButton: () => null,

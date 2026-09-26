@@ -8,9 +8,15 @@ export interface Product {
   mrp?: number;
   ptr?: number; // Price to Retailer
   pts?: number; // Price to Stockist
+  gstPercentage?: number;
   packSize?: string;
   manufacturer?: string;
   description?: string;
+  brandImageUrl?: string;
+  visualAidUrl?: string;
+  brochureUrl?: string;
+  productVideoUrl?: string;
+  isCampaignProduct?: boolean;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;

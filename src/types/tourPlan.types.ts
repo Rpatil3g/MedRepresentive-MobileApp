@@ -7,7 +7,7 @@ export type PlanStatus = 'DRAFT' | 'PENDING' | 'APPROVED' | 'REJECTED';
 export interface TourPlanDetailInput {
   planDate: string;       // ISO date string  'YYYY-MM-DD'
   routeId?: string;
-  territoryId?: string;
+  headquartersId?: string;
   activityType: ActivityType;
   leaveType?: LeaveType;
   leaveReason?: string;
@@ -30,14 +30,15 @@ export interface TourPlanDetailResponse {
   planDate: string;
   routeId?: string;
   routeName?: string;
-  territoryId?: string;
-  territoryName?: string;
+  headquartersId?: string;
+  headquartersName?: string;
   activityType: ActivityType;
   leaveType?: LeaveType;
   leaveReason?: string;
   estimatedCalls: number;
   notes?: string;
   plannedDoctorIds: string[];
+  plannedContactNames: string[];
   focusProductIds: string[];
 }
 
@@ -97,10 +98,10 @@ export interface TourPlanSummary {
 export interface DraftDayEntry {
   date: string;
   activityType: ActivityType;
+  hqId?: string;
+  hqName?: string;
   routeId?: string;
   routeName?: string;
-  territoryId?: string;
-  territoryName?: string;
   plannedDoctorIds?: string[];
   plannedDoctorNames?: string[];  // display names for pills
   focusProductIds?: string[];

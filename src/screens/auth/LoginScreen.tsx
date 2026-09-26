@@ -8,6 +8,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { Button, Input, Loading } from '../../components/common';
@@ -22,6 +23,7 @@ interface LoginFormData {
 
 const LoginScreen: React.FC = () => {
   const { login, loading } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const {
     control,
@@ -61,7 +63,7 @@ const LoginScreen: React.FC = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top }]}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoContainer}>
@@ -84,6 +86,9 @@ const LoginScreen: React.FC = () => {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="email"
+                textContentType="emailAddress"
+                importantForAutofill="yes"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
@@ -101,6 +106,9 @@ const LoginScreen: React.FC = () => {
                 placeholder="Enter your password"
                 icon="lock"
                 secureTextEntry
+                autoComplete="password"
+                textContentType="password"
+                importantForAutofill="yes"
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}

@@ -4,23 +4,31 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   TouchableOpacity,
   TouchableWithoutFeedback,
   TextInput,
   Modal,
   ActivityIndicator,
   Alert,
-  Platform,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { Button } from '../../components/common';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { upsertDraftEntry, removeDraftEntry } from '../../store/slices/tourPlanSlice';
+import {
+  upsertDraftEntry,
+  removeDraftEntry,
+  setLastEditedDate,
+  setCurrentPlan,
+  loadDraftFromPlan,
+} from '../../store/slices/tourPlanSlice';
 import axiosInstance from '../../services/api/axiosInstance';
+import tourPlanApi from '../../services/api/tourPlanApi';
 import { API_CONFIG } from '../../config/api.config';
 import { COLORS, SIZES } from '../../constants';
-import { ActivityType, DraftDayEntry, LeaveType } from '../../types/tourPlan.types';
+import { formatDoctorName } from '../../utils/helpers';
+import { ActivityType, DraftDayEntry, LeaveType, TourPlanDetailInput } from '../../types/tourPlan.types';
 import { TourPlanStackParamList } from '../../types/navigation.types';
 
 type RouteProps = RouteProp<TourPlanStackParamList, 'DayPlanForm'>;
@@ -52,6 +60,7 @@ function fmtDisplay(iso: string) {
   const dt = parseDate(iso);
   return `${String(dt.getDate()).padStart(2,'0')}-${String(dt.getMonth()+1).padStart(2,'0')}-${dt.getFullYear()}`;
 }
+
 function toISO(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
@@ -68,7 +77,6 @@ const CalendarModal: React.FC<{
 
   const year  = view.getFullYear();
   const month = view.getMonth();
-  const selected = parseDate(currentISO);
 
   const firstDay     = new Date(year, month, 1).getDay();
   const daysInMonth  = new Date(year, month + 1, 0).getDate();
@@ -158,11 +166,13 @@ const Dropdown: React.FC<{
 
   const close = () => setOpen(false);
 
+  const resolvedName = options.find(o => o.id === selected?.id)?.name ?? selected?.name;
+
   return (
     <View>
       <TouchableOpacity ref={triggerRef as any} style={f.input} onPress={handleOpen} activeOpacity={0.8}>
-        <Text style={[f.inputText, !selected && f.placeholder]}>
-          {loading ? 'Loading...' : (selected?.name ?? placeholder)}
+        <Text style={[f.inputText, !resolvedName && f.placeholder]}>
+          {loading ? 'Loading...' : (resolvedName || placeholder)}
         </Text>
         <MaterialCommunityIcons
           name={open ? 'chevron-up' : 'chevron-down'}
@@ -213,43 +223,72 @@ const MultiSelect: React.FC<{
   onSearch: (q: string) => Promise<Option[]>;
   onAdd: (o: Option) => void;
   onRemove: (id: string) => void;
-}> = ({ searchPlaceholder, pillBg, pillColor, selected, onSearch, onAdd, onRemove }) => {
-  const [query,    setQuery]    = useState('');
-  const [results,  setResults]  = useState<Option[]>([]);
-  const [busy,     setBusy]     = useState(false);
-  const [open,     setOpen]     = useState(false);
-  const [menuPos,  setMenuPos]  = useState({ top: 0, left: 0, width: 0 });
-  const searchRef               = useRef<View>(null);
+  showAllOnEmpty?: boolean;
+}> = ({ searchPlaceholder, pillBg, pillColor, selected, onSearch, onAdd, onRemove, showAllOnEmpty }) => {
+  const [query,   setQuery]   = useState('');
+  const [results, setResults] = useState<Option[]>([]);
+  const [busy,    setBusy]    = useState(false);
+  const [focused, setFocused] = useState(false);
 
   const bg  = pillBg    ?? C.primaryLight;
   const txt = pillColor ?? C.primary;
 
   const doSearch = useCallback(async (text: string) => {
     setQuery(text);
-    if (!text.trim()) { setResults([]); setOpen(false); return; }
+    setFocused(true);
+    if (!text.trim()) {
+      if (showAllOnEmpty) {
+        try {
+          setBusy(true);
+          const data = await onSearch('');
+          setResults(data.filter(r => !selected.find(s => s.id === r.id)));
+        } catch { setResults([]); }
+        finally  { setBusy(false); }
+      } else {
+        setResults([]);
+      }
+      return;
+    }
     try {
       setBusy(true);
       const data = await onSearch(text);
-      const filtered = data.filter(r => !selected.find(s => s.id === r.id));
-      setResults(filtered);
-      if (filtered.length > 0) {
-        // Measure search box position for the floating results panel
-        searchRef.current?.measure((_x, _y, width, height, pageX, pageY) => {
-          setMenuPos({ top: pageY + height + 2, left: pageX, width });
-          setOpen(true);
-        });
-      } else {
-        setOpen(false);
-      }
-    } catch { setResults([]); setOpen(false); }
+      setResults(data.filter(r => !selected.find(s => s.id === r.id)));
+    } catch { setResults([]); }
     finally  { setBusy(false); }
-  }, [onSearch, selected]);
+  }, [onSearch, selected, showAllOnEmpty]);
 
-  const closeResults = () => { setOpen(false); };
+  // When the source list changes (e.g. route switched), re-run the current search so
+  // options from the previous route can't still be picked from the open list.
+  useEffect(() => {
+    let cancelled = false;
+    if (!query.trim() && !showAllOnEmpty) {
+      setResults([]);
+      return;
+    }
+    onSearch(query)
+      .then(data => { if (!cancelled) setResults(data.filter(r => !selected.find(s => s.id === r.id))); })
+      .catch(() => { if (!cancelled) setResults([]); });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onSearch]);
+
+  const handleFocus = async () => {
+    setFocused(true);
+    if (!query.trim() && showAllOnEmpty) {
+      try {
+        setBusy(true);
+        const data = await onSearch('');
+        setResults(data.filter(r => !selected.find(s => s.id === r.id)));
+      } catch { setResults([]); }
+      finally  { setBusy(false); }
+    }
+  };
 
   const pick = (o: Option) => {
     onAdd(o);
-    setQuery(''); setResults([]); setOpen(false);
+    setQuery('');
+    setResults([]);
+    setFocused(false);
   };
 
   return (
@@ -267,7 +306,7 @@ const MultiSelect: React.FC<{
         </View>
       )}
 
-      <View ref={searchRef as any} style={f.searchBox}>
+      <View style={f.searchBox}>
         <MaterialCommunityIcons name="magnify" size={18} color={C.textMuted} style={f.searchIcon} />
         <TextInput
           style={f.searchInput}
@@ -275,27 +314,23 @@ const MultiSelect: React.FC<{
           placeholderTextColor={C.textMuted}
           value={query}
           onChangeText={doSearch}
+          onFocus={handleFocus}
+          onBlur={() => setFocused(false)}
         />
         {busy && <ActivityIndicator size="small" color={C.primary} />}
       </View>
 
-      {/* Floating results — Modal backdrop collapses on outside tap */}
-      <Modal visible={open} transparent animationType="none" onRequestClose={closeResults}>
-        <TouchableWithoutFeedback onPress={closeResults}>
-          <View style={f.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[f.menu, { position: 'absolute', top: menuPos.top, left: menuPos.left, width: menuPos.width }]}>
-                {results.slice(0, 8).map(r => (
-                  <TouchableOpacity key={r.id} style={f.menuItem} onPress={() => pick(r)}>
-                    <Text style={f.menuItemText}>{r.name}</Text>
-                    <MaterialCommunityIcons name="plus-circle-outline" size={18} color={C.primary} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+      {/* Inline results — no Modal so keyboard stays up while user types */}
+      {focused && results.length > 0 && (
+        <View style={f.inlineResults}>
+          {results.slice(0, 8).map(r => (
+            <TouchableOpacity key={r.id} style={f.menuItem} onPress={() => pick(r)}>
+              <Text style={f.menuItemText}>{r.name}</Text>
+              <MaterialCommunityIcons name="plus-circle-outline" size={18} color={C.primary} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
     </View>
   );
 };
@@ -330,45 +365,79 @@ const LEAVE_OPTS: { type: LeaveType; label: string }[] = [
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 const DayPlanFormScreen: React.FC = () => {
-  const navigation = useNavigation();
-  const route      = useRoute<RouteProps>();
-  const dispatch   = useAppDispatch();
-  const mrProfile  = useAppSelector(state => state.user.mrProfile);
-  const { date: initDate, existingEntry } = route.params;
+  const navigation   = useNavigation();
+  const route        = useRoute<RouteProps>();
+  const dispatch     = useAppDispatch();
+  const draftEntries = useAppSelector((s: any) => s.tourPlan.draftEntries);
+  const mrProfile    = useAppSelector(s => s.user.mrProfile);
+  const authUser     = useAppSelector(s => s.auth.user);
+  const { date: initDate, existingEntry, month: planMonth, year: planYear, readOnly } = route.params;
 
-  const [date,           setDate]           = useState(initDate);
-  const [showCal,        setShowCal]        = useState(false);
-  const [activityType,   setActivityType]   = useState<ActivityType>(existingEntry?.activityType ?? 'FIELD_WORK');
-  const [leaveType,      setLeaveType]      = useState<LeaveType | undefined>(existingEntry?.leaveType);
-  const [notes,          setNotes]          = useState(existingEntry?.notes ?? '');
+  // Most recent prior-day draft entry — used to pre-fill new (not existing) day forms
+  const scrollRef = useRef<ScrollView>(null);
 
-  // Territories — sourced directly from the MR profile already in Redux store.
-  // The profile (fetched via /medicalreps/by-user) contains territoryAssignments
-  // with territoryId + territoryName on each item.
-  const territories: Option[] = (mrProfile?.territoryAssignments ?? []).map((a: any) => ({
-    id:   a.territoryId   ?? a.territory?.id,
-    name: a.territoryName ?? a.territory?.name ?? a.territoryCode,
-  }));
+  const autoFill = useRef<DraftDayEntry | null>(
+    !existingEntry
+      ? (Object.values(draftEntries) as DraftDayEntry[])
+          .filter(e => e.date < initDate)
+          .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
+      : null,
+  ).current;
 
-  const [territory, setTerritory] = useState<Option | undefined>(
-    existingEntry?.territoryId ? { id: existingEntry.territoryId, name: existingEntry.territoryName ?? '' } : undefined,
+  const [date,         setDate]         = useState(initDate);
+  const [showCal,      setShowCal]      = useState(false);
+  const [activityType, setActivityType] = useState<ActivityType>(
+    existingEntry?.activityType ?? autoFill?.activityType ?? 'FIELD_WORK',
+  );
+  const [leaveType,    setLeaveType]    = useState<LeaveType | undefined>(
+    existingEntry?.leaveType ?? autoFill?.leaveType,
+  );
+  const [notes,        setNotes]        = useState(existingEntry?.notes ?? '');
+  const [saving,       setSaving]       = useState(false);
+
+  // An MR works from a single HQ (set by admin on their profile), so it is fixed on the plan.
+  // The dropdown is only a fallback for an MR who has no HQ assigned yet.
+  const profileHqId = mrProfile?.headquartersId ?? authUser?.headquartersId;
+  const profileHq: Option | undefined = profileHqId
+    ? { id: profileHqId, name: mrProfile?.headquartersName ?? authUser?.headquartersName ?? '' }
+    : undefined;
+  const seed = existingEntry ?? autoFill;
+  // A saved route only carries over if it belongs to the HQ being used
+  const seedMatchesHq = !profileHq || !seed?.hqId || seed.hqId === profileHq.id;
+
+  // HQ / Location — fetched from /headquarters API (fallback dropdown only)
+  const [hqOpts,     setHqOpts]     = useState<Option[]>([]);
+  const [loadingHQ,  setLoadingHQ]  = useState(false);
+  const [hq,         setHq]         = useState<Option | undefined>(
+    profileHq
+    ?? (seed?.hqId ? { id: seed.hqId, name: seed.hqName ?? '' } : undefined),
   );
 
-  // Routes
+  // Routes — filtered by selected HQ
   const [routeOpts,     setRouteOpts]     = useState<Option[]>([]);
   const [loadingRoutes, setLoadingRoutes] = useState(false);
-  const [selRoute,       setSelRoute]       = useState<Option | undefined>(
-    existingEntry?.routeId ? { id: existingEntry.routeId, name: existingEntry.routeName ?? '' } : undefined,
+  const [selRoute,      setSelRoute]      = useState<Option | undefined>(
+    seed?.routeId && seedMatchesHq ? { id: seed.routeId, name: seed.routeName ?? '' } : undefined,
   );
 
-  // Doctors / Chemists
+  // Contact pool — doctors + chemists (by route) + stockists (by HQ), pre-loaded
+  const [contactPool,     setContactPool]     = useState<Option[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const contactsRequestRef = useRef(0);
+  // Widen doctors/chemists from the selected route to the whole HQ (incl. those with no route yet)
+  const [showAllInHQ,     setShowAllInHQ]     = useState(false);
+
+  // Selected contacts (doctors / chemists / stockists)
   const [doctors, setDoctors] = useState<Option[]>(
     (existingEntry?.plannedDoctorIds ?? []).map((id, i) => ({
       id, name: existingEntry?.plannedDoctorNames?.[i] ?? id,
     })),
   );
 
-  // Products
+  // Campaign products — pre-loaded once
+  const [campaignProducts, setCampaignProducts] = useState<Option[]>([]);
+
+  // Selected products
   const [products, setProducts] = useState<Option[]>(
     (existingEntry?.focusProductIds ?? []).map((id, i) => ({
       id, name: existingEntry?.focusProductNames?.[i] ?? id,
@@ -377,51 +446,193 @@ const DayPlanFormScreen: React.FC = () => {
 
   const isFieldWork = activityType === 'FIELD_WORK';
 
-  useEffect(() => {
-    if (isFieldWork) { loadRoutes(); }
-  }, [isFieldWork]);
+  // ── Loaders ──────────────────────────────────────────────────────────────────
 
-  const loadRoutes = async () => {
+  const loadHQ = async () => {
+    try {
+      setLoadingHQ(true);
+      const res = await axiosInstance.get(API_CONFIG.ENDPOINTS.HEADQUARTERS);
+      const list: any[] = res.data ?? [];
+      setHqOpts(list.map(h => ({ id: h.id, name: h.hqName ?? h.hQName ?? h.name ?? '' })));
+    } catch { /* silently fail */ } finally { setLoadingHQ(false); }
+  };
+
+  const loadRoutes = async (hqId: string) => {
     try {
       setLoadingRoutes(true);
-      const res  = await axiosInstance.get('/routes', { params: { pageSize: 100 } });
+      const res = await axiosInstance.get(API_CONFIG.ENDPOINTS.ROUTES, {
+        params: { headquartersId: hqId, pageSize: 100, isActive: true },
+      });
       const list: any[] = res.data?.items ?? res.data ?? [];
       setRouteOpts(list.map(r => ({ id: r.id, name: r.routeName })));
     } catch { /* silently fail */ } finally { setLoadingRoutes(false); }
   };
 
-  const searchDoctors = async (q: string): Promise<Option[]> => {
-    // API uses route param: GET /doctors/search/{searchTerm}
-    const res  = await axiosInstance.get(`${API_CONFIG.ENDPOINTS.DOCTORS_SEARCH}/${encodeURIComponent(q)}`);
-    const list: any[] = res.data?.data ?? res.data ?? [];
-    return list.map((d: any) => ({ id: d.id, name: d.doctorName ?? d.name }));
+  // Fetches doctors + chemists (by route, or HQ-wide when no route / allInHQ) and stockists (by HQ)
+  const loadContacts = async (hqId: string, routeId?: string, allInHQ = false) => {
+    // Only the latest request may update the pool — a slow response for a previous route is dropped
+    const requestId = ++contactsRequestRef.current;
+    try {
+      setLoadingContacts(true);
+      const hqWideParams = {
+        params: { headquartersId: hqId, includeUnassigned: true, isActive: true, pageSize: 200 },
+      };
+      const byRoute = !!routeId && !allInHQ;
+      const settled = await Promise.allSettled([
+        byRoute
+          ? axiosInstance.get(`${API_CONFIG.ENDPOINTS.DOCTORS}/by-route/${routeId}`)
+          : axiosInstance.get(API_CONFIG.ENDPOINTS.DOCTORS, hqWideParams),
+        byRoute
+          ? axiosInstance.get(`${API_CONFIG.ENDPOINTS.CHEMISTS}/by-route/${routeId}`)
+          : axiosInstance.get(API_CONFIG.ENDPOINTS.CHEMISTS, hqWideParams),
+        axiosInstance.get(API_CONFIG.ENDPOINTS.STOCKISTS, {
+          params: { headquartersId: hqId, pageSize: 200, isActive: true },
+        }),
+      ]);
+      const listOf = (body: any): any[] =>
+        body?.items ?? body?.data?.items ?? body?.data ?? (Array.isArray(body) ? body : []);
+
+      const pool: Option[] = [];
+      const [docRes, chemRes, stkRes] = settled;
+
+      if (docRes.status === 'fulfilled') {
+        listOf(docRes.value.data).forEach((d: any) =>
+          pool.push({ id: d.id, name: formatDoctorName(d.doctorName ?? d.name) }),
+        );
+      }
+      if (chemRes.status === 'fulfilled') {
+        listOf(chemRes.value.data).forEach((c: any) =>
+          pool.push({ id: c.id, name: `${c.chemistName ?? c.pharmacyName ?? c.name} (Chemist)` }),
+        );
+      }
+      if (stkRes.status === 'fulfilled') {
+        (stkRes.value.data?.items ?? stkRes.value.data?.data ?? stkRes.value.data ?? []).forEach((s: any) =>
+          pool.push({ id: s.id, name: `${s.stockistName ?? s.name} (Stockist)` }),
+        );
+      }
+      if (requestId !== contactsRequestRef.current) return;
+      setContactPool(pool);
+    } catch { /* silently fail */ } finally {
+      if (requestId === contactsRequestRef.current) setLoadingContacts(false);
+    }
   };
 
-  const searchProducts = async (q: string): Promise<Option[]> => {
-    const res  = await axiosInstance.get(API_CONFIG.ENDPOINTS.PRODUCTS_CAMPAIGN);
-    const list: any[] = res.data?.data ?? res.data ?? [];
-    return list
-      .filter((p: any) => (p.productName ?? '').toLowerCase().includes(q.toLowerCase()))
-      .map((p: any) => ({ id: p.id, name: p.productName }));
+  const loadCampaignProducts = async () => {
+    try {
+      const res = await axiosInstance.get(API_CONFIG.ENDPOINTS.PRODUCTS_CAMPAIGN);
+      const list: any[] = res.data?.data ?? res.data ?? [];
+      setCampaignProducts(list.map((p: any) => ({ id: p.id, name: p.productName ?? p.name ?? '' })));
+    } catch { /* silently fail */ }
   };
 
-  const handleSave = () => {
-    if (isFieldWork && !territory) {
-      Alert.alert('HQ / Location Required', 'Please select a territory for field work days.');
+  // Once contactPool loads, resolve display names for any pills that still show raw UUIDs
+  useEffect(() => {
+    if (contactPool.length === 0 || doctors.length === 0) return;
+    setDoctors(prev => prev.map(d => {
+      const match = contactPool.find(c => c.id === d.id);
+      return match ?? d;
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contactPool]);
+
+  // Once campaignProducts loads, resolve display names for product pills that show raw UUIDs
+  useEffect(() => {
+    if (campaignProducts.length === 0 || products.length === 0) return;
+    setProducts(prev => prev.map(p => {
+      const match = campaignProducts.find(c => c.id === p.id);
+      return match ?? p;
+    }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignProducts]);
+
+  // On entering field-work mode, fetch HQ list + campaign products.
+  // If editing an existing entry or auto-filling from a prior day, also restore routes and contact pool.
+  useEffect(() => {
+    if (!isFieldWork) return;
+    if (!profileHq) { loadHQ(); }
+    loadCampaignProducts();
+    if (hq) {
+      loadRoutes(hq.id);
+      loadContacts(hq.id, selRoute?.id);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFieldWork]);
+
+  // ── Change handlers ───────────────────────────────────────────────────────────
+
+  const handleHQChange = (o: Option) => {
+    setHq(o);
+    setSelRoute(undefined);
+    setRouteOpts([]);
+    setContactPool([]);
+    setDoctors([]);
+    setShowAllInHQ(false);
+    loadRoutes(o.id);
+    loadContacts(o.id);
+  };
+
+  const handleRouteChange = (o: Option) => {
+    setSelRoute(o);
+    setContactPool([]);
+    setDoctors([]);
+    setShowAllInHQ(false);
+    if (hq) { loadContacts(hq.id, o.id); }
+  };
+
+  // Keeps already-picked contacts; only widens/narrows what the search offers
+  const toggleShowAllInHQ = () => {
+    const next = !showAllInHQ;
+    setShowAllInHQ(next);
+    if (hq) { loadContacts(hq.id, selRoute?.id, next); }
+  };
+
+  // ── Search callbacks (filter pre-loaded pools) ────────────────────────────────
+
+  const searchContacts = useCallback(async (q: string): Promise<Option[]> => {
+    if (!q.trim()) return [];
+    const lower = q.toLowerCase();
+    return contactPool.filter(c => c.name.toLowerCase().includes(lower));
+  }, [contactPool]);
+
+  const searchProducts = useCallback(async (q: string): Promise<Option[]> => {
+    if (!q.trim()) return campaignProducts;
+    const lower = q.toLowerCase();
+    return campaignProducts.filter(p => p.name.toLowerCase().includes(lower));
+  }, [campaignProducts]);
+
+  const handleSave = async () => {
+    if (isFieldWork && !hq) {
+      Alert.alert('HQ / Location Required', 'Please select an HQ / location for field work days.');
       return;
     }
     if (activityType === 'LEAVE' && !leaveType) {
       Alert.alert('Leave Type Required', 'Please select a leave type.');
       return;
     }
+    if (isFieldWork && doctors.length > 0) {
+      if (loadingContacts) {
+        Alert.alert('Please Wait', 'Doctors and chemists for this route are still loading.');
+        return;
+      }
+      const available = new Set(contactPool.map(c => c.id));
+      const stray = doctors.filter(d => !available.has(d.id));
+      if (stray.length > 0) {
+        Alert.alert(
+          'Contacts Not on This Route',
+          `${stray.map(d => d.name).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not on the selected route. ` +
+          'Remove them, pick another route, or tick "Show all doctors & chemists in this HQ".',
+        );
+        return;
+      }
+    }
 
     const entry: DraftDayEntry = {
       date,
       activityType,
-      routeId:            isFieldWork ? selRoute?.id    : undefined,
-      routeName:          isFieldWork ? selRoute?.name  : undefined,
-      territoryId:        isFieldWork ? territory?.id   : undefined,
-      territoryName:      isFieldWork ? territory?.name : undefined,
+      hqId:               isFieldWork ? hq?.id        : undefined,
+      hqName:             isFieldWork ? hq?.name       : undefined,
+      routeId:            isFieldWork ? selRoute?.id   : undefined,
+      routeName:          isFieldWork ? selRoute?.name : undefined,
       plannedDoctorIds:   isFieldWork ? doctors.map(d => d.id)   : [],
       plannedDoctorNames: isFieldWork ? doctors.map(d => d.name) : [],
       focusProductIds:    isFieldWork ? products.map(p => p.id)   : [],
@@ -431,23 +642,67 @@ const DayPlanFormScreen: React.FC = () => {
       leaveType:          activityType === 'LEAVE' ? leaveType : undefined,
     };
 
-    dispatch(upsertDraftEntry(entry));
-    navigation.goBack();
+    // Merge with all existing draft entries for this month so previously planned
+    // days are not overwritten when we send the full list to the backend.
+    const allEntries: Record<string, DraftDayEntry> = { ...draftEntries, [date]: entry };
+    const details: TourPlanDetailInput[] = Object.values(allEntries).map((e: any) => ({
+      planDate:         e.date,
+      activityType:     e.activityType,
+      headquartersId:   e.hqId,
+      routeId:          e.routeId,
+      estimatedCalls:   e.estimatedCalls,
+      notes:            e.notes,
+      leaveType:        e.leaveType,
+      plannedDoctorIds: e.plannedDoctorIds ?? [],
+      focusProductIds:  e.focusProductIds  ?? [],
+    }));
+
+    try {
+      setSaving(true);
+      dispatch(upsertDraftEntry(entry));
+      const saved = await tourPlanApi.createOrUpdate({ month: planMonth, year: planYear, details });
+      dispatch(setCurrentPlan(saved));
+      dispatch(loadDraftFromPlan(saved));
+      dispatch(setLastEditedDate(date));
+      navigation.goBack();
+    } catch (err: any) {
+      Alert.alert('Save Failed', err?.response?.data?.message ?? 'Could not save the plan. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClear = () => {
     Alert.alert('Clear Day', 'Remove the plan for this day?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: () => { dispatch(removeDraftEntry(date)); navigation.goBack(); } },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: async () => {
+          dispatch(removeDraftEntry(date));
+          try { await tourPlanApi.clearDetail(date); } catch { /* silently ignore — local state already cleared */ }
+          navigation.goBack();
+        },
+      },
     ]);
   };
 
   return (
-    <View style={s.page}>
-      <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView
+      style={s.page}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView ref={scrollRef} contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
 
         {/* ── Single white card wrapping the entire form (like sample UI) ── */}
         <View style={s.card}>
+
+          {readOnly && (
+            <View style={s.readOnlyBanner}>
+              <MaterialCommunityIcons name="lock-outline" size={15} color="#92400e" />
+              <Text style={s.readOnlyText}>This plan is locked and cannot be edited.</Text>
+            </View>
+          )}
 
           {/* Date */}
           <Field label="Select Date">
@@ -474,32 +729,56 @@ const DayPlanFormScreen: React.FC = () => {
           {isFieldWork && (
             <>
               <Field label="HQ / Location" required>
-                <Dropdown
-                  placeholder="-- Select Town/Area --"
-                  selected={territory}
-                  options={territories}
-                  onSelect={setTerritory}
-                />
+                {profileHq ? (
+                  <View style={[f.input, f.inputLocked]}>
+                    <Text style={f.inputText}>{hq?.name || 'Your HQ'}</Text>
+                    <MaterialCommunityIcons name="lock-outline" size={16} color={C.textMuted} />
+                  </View>
+                ) : (
+                  <Dropdown
+                    placeholder="-- Select HQ / Location --"
+                    selected={hq}
+                    options={hqOpts}
+                    loading={loadingHQ}
+                    onSelect={handleHQChange}
+                  />
+                )}
               </Field>
 
               <Field label="Route / Area Plan">
                 <Dropdown
-                  placeholder="-- Select Route --"
+                  placeholder={hq ? '-- Select Route --' : '-- Select HQ first --'}
                   selected={selRoute}
                   options={routeOpts}
                   loading={loadingRoutes}
-                  onSelect={setSelRoute}
+                  onSelect={handleRouteChange}
                 />
               </Field>
 
-              <Field label="Doctor / Chemist Plan" required>
+              <Field label="Doctor / Chemist / Stockist Plan" required>
                 <MultiSelect
-                  searchPlaceholder="Search and select doctors..."
+                  searchPlaceholder={
+                    loadingContacts
+                      ? 'Loading contacts...'
+                      : hq
+                        ? 'Search doctors, chemists, stockists...'
+                        : 'Select HQ first to load contacts'
+                  }
                   selected={doctors}
-                  onSearch={searchDoctors}
+                  onSearch={searchContacts}
                   onAdd={o => setDoctors(prev => [...prev, o])}
                   onRemove={id => setDoctors(prev => prev.filter(d => d.id !== id))}
                 />
+                {!!selRoute && !readOnly && (
+                  <TouchableOpacity style={s.toggleRow} onPress={toggleShowAllInHQ} activeOpacity={0.7}>
+                    <MaterialCommunityIcons
+                      name={showAllInHQ ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                      size={20}
+                      color={showAllInHQ ? C.primary : C.textMuted}
+                    />
+                    <Text style={s.toggleText}>Show all doctors & chemists in this HQ</Text>
+                  </TouchableOpacity>
+                )}
               </Field>
 
               <Field label="Product Focus">
@@ -511,6 +790,7 @@ const DayPlanFormScreen: React.FC = () => {
                   onSearch={searchProducts}
                   onAdd={o => setProducts(prev => [...prev, o])}
                   onRemove={id => setProducts(prev => prev.filter(p => p.id !== id))}
+                  showAllOnEmpty
                 />
               </Field>
             </>
@@ -539,18 +819,25 @@ const DayPlanFormScreen: React.FC = () => {
               value={notes}
               onChangeText={setNotes}
               textAlignVertical="top"
+              onFocus={() => setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100)}
             />
           </Field>
 
-          {/* Save button */}
-          <TouchableOpacity style={s.btnPrimary} onPress={handleSave} activeOpacity={0.85}>
-            <Text style={s.btnPrimaryText}>Save Plan</Text>
-          </TouchableOpacity>
+          {!readOnly && (
+            <>
+              <TouchableOpacity style={s.btnPrimary} onPress={handleSave} activeOpacity={0.85} disabled={saving}>
+                {saving
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={s.btnPrimaryText}>Save Plan</Text>
+                }
+              </TouchableOpacity>
 
-          {existingEntry && (
-            <TouchableOpacity style={s.btnOutline} onPress={handleClear} activeOpacity={0.85}>
-              <Text style={s.btnOutlineText}>Clear Day</Text>
-            </TouchableOpacity>
+              {existingEntry && (
+                <TouchableOpacity style={s.btnOutline} onPress={handleClear} activeOpacity={0.85}>
+                  <Text style={s.btnOutlineText}>Clear Day</Text>
+                </TouchableOpacity>
+              )}
+            </>
           )}
         </View>
       </ScrollView>
@@ -562,7 +849,7 @@ const DayPlanFormScreen: React.FC = () => {
         onSelect={setDate}
         onClose={() => setShowCal(false)}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -595,8 +882,18 @@ const f = StyleSheet.create({
   label: { fontSize: 13.5, fontWeight: '600', color: C.textDark, marginBottom: 6 },
   req:   { color: C.danger },
 
-  // Full-screen transparent overlay behind floating menus
+  // Full-screen transparent overlay behind floating dropdown menus (Dropdown component only)
   modalOverlay: { flex: 1 },
+
+  // Inline search results (MultiSelect) — rendered in document flow so keyboard stays up
+  inlineResults: {
+    marginTop: 4,
+    backgroundColor: C.cardBg,
+    borderWidth: 1, borderColor: C.border,
+    borderRadius: SIZES.radiusMD,
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 3,
+  },
 
   // Generic input / dropdown trigger
   input: {
@@ -607,6 +904,7 @@ const f = StyleSheet.create({
     paddingHorizontal: SIZES.paddingMD, paddingVertical: 12,
   },
   inputText:   { flex: 1, fontSize: SIZES.fontMD, color: C.textDark },
+  inputLocked: { opacity: 0.8 },
   placeholder: { color: C.textMuted },
 
   // Dropdown menu
@@ -649,7 +947,9 @@ const f = StyleSheet.create({
 // ─── Screen-level styles ──────────────────────────────────────────────────────
 const s = StyleSheet.create({
   page:   { flex: 1, backgroundColor: C.pageBg },
-  scroll: { padding: SIZES.paddingMD, paddingBottom: 40 },
+  toggleRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  toggleText: { fontSize: SIZES.fontSM, color: C.textMuted },
+  scroll: { padding: SIZES.paddingMD, paddingBottom: 120 },
 
   // White card — mirrors sample UI `.card`
   card: {
@@ -658,6 +958,23 @@ const s = StyleSheet.create({
     padding: 20,
     borderWidth: 1, borderColor: C.border,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2,
+  },
+
+  readOnlyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+    borderRadius: SIZES.radiusMD,
+    padding: SIZES.paddingSM,
+    marginBottom: 16,
+  },
+  readOnlyText: {
+    fontSize: SIZES.fontSM,
+    color: '#92400e',
+    flex: 1,
   },
 
   // Primary button — mirrors sample UI `.btn-primary`

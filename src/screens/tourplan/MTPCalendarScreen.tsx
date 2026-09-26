@@ -9,8 +9,8 @@ import {
   ScrollView,
   FlatList,
   Dimensions,
-
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -22,8 +22,8 @@ import {
   setLoading,
   setSaving,
   loadDraftFromPlan,
-  clearDraft,
   setViewMonth,
+  setLastEditedDate,
 } from '../../store/slices/tourPlanSlice';
 import tourPlanApi from '../../services/api/tourPlanApi';
 import { COLORS, SIZES } from '../../constants';
@@ -32,7 +32,6 @@ import {
   ActivityType,
   DayPlan,
   PlanStatus,
-  TourPlanDetailInput,
   TourPlanDetailResponse,
 } from '../../types/tourPlan.types';
 
@@ -214,12 +213,15 @@ const buildCalendarRows = (
 const MTPCalendarScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const dispatch = useAppDispatch();
-  const { currentPlan, calendar, draftEntries, viewMonth, viewYear, loading, saving } =
+  const insets = useSafeAreaInsets();
+  const { currentPlan, calendar, draftEntries, viewMonth, viewYear, loading, saving, lastEditedDate } =
     useAppSelector((s: any) => s.tourPlan);
 
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr());
   const dateStripRef = useRef<FlatList<WeekDay[]>>(null);
+  // Holds the date to scroll to after the screen regains focus
+  const pendingScrollDate = useRef<string | null>(null);
 
   // Scroll date strip to the week containing selectedDate when month changes
   useEffect(() => {
@@ -229,9 +231,30 @@ const MTPCalendarScreen: React.FC = () => {
     setTimeout(() => dateStripRef.current?.scrollToIndex({ index: target, animated: false }), 80);
   }, [viewMonth, viewYear]);
 
+  // Capture lastEditedDate into a ref so it can be consumed after screen focus
+  useEffect(() => {
+    if (!lastEditedDate) return;
+    pendingScrollDate.current = lastEditedDate;
+    dispatch(setLastEditedDate(null));
+  }, [lastEditedDate]);
+
   useFocusEffect(
     useCallback(() => {
       loadMonthData(viewMonth, viewYear);
+
+      // Apply any pending post-save scroll now that the screen is visible
+      const target = pendingScrollDate.current;
+      if (target) {
+        pendingScrollDate.current = null;
+        setSelectedDate(target);
+        setViewMode('week');
+        const weeks = getWeeksForMonth(viewMonth, viewYear);
+        const idx = weeks.findIndex(w => w.some(d => d.date === target));
+        if (idx >= 0) {
+          // Delay past the navigation transition (~300 ms) so the FlatList is laid out
+          setTimeout(() => dateStripRef.current?.scrollToIndex({ index: idx, animated: true }), 350);
+        }
+      }
     }, [viewMonth, viewYear]),
   );
 
@@ -244,10 +267,12 @@ const MTPCalendarScreen: React.FC = () => {
       ]);
       dispatch(setCurrentPlan(plan));
       dispatch(setCalendar(cal));
+      // Only hydrate from the server plan when it exists as a DRAFT.
+      // Do NOT clear local drafts when no server plan exists — the user may have
+      // just added local drafts that haven't been saved to the server yet.
+      // Drafts are cleared by setViewMonth (month navigation) instead.
       if (plan?.approvalStatus === 'DRAFT') {
         dispatch(loadDraftFromPlan(plan));
-      } else if (!plan) {
-        dispatch(clearDraft());
       }
     } catch (err) {
       console.error('Failed to load month data:', err);
@@ -277,47 +302,37 @@ const MTPCalendarScreen: React.FC = () => {
   const navigateToDayForm = (date: string) => {
     const dayInfo = calendar?.days?.find((d: DayPlan) => d.date.startsWith(date));
     if (dayInfo?.isWeekend || dayInfo?.isHoliday) return;
-    if (planStatus === 'APPROVED' || planStatus === 'PENDING') {
-      Alert.alert(
-        'Plan Locked',
-        planStatus === 'APPROVED'
-          ? 'This plan is approved and cannot be edited.'
-          : 'This plan is pending approval.',
-      );
-      return;
-    }
+    const locked = planStatus === 'APPROVED' || planStatus === 'PENDING';
+
+    const draftEntry = draftEntries[date];
+    const serverDetail = currentPlan?.details?.find(
+      (d: TourPlanDetailResponse) => d.planDate.startsWith(date),
+    );
+
+    if (locked && !draftEntry && !serverDetail) return; // nothing to show
+
+    const existingEntry = draftEntry ?? (serverDetail ? {
+      date,
+      activityType: serverDetail.activityType,
+      hqId:         serverDetail.headquartersId,
+      hqName:       serverDetail.headquartersName,
+      routeId:      serverDetail.routeId,
+      routeName:    serverDetail.routeName,
+      plannedDoctorIds:   serverDetail.plannedDoctorIds,
+      plannedDoctorNames: serverDetail.plannedContactNames,
+      focusProductIds:    serverDetail.focusProductIds,
+      estimatedCalls:     serverDetail.estimatedCalls,
+      notes:              serverDetail.notes,
+      leaveType:          serverDetail.leaveType,
+    } : undefined);
+
     navigation.navigate('DayPlanForm', {
       date,
       month: viewMonth,
       year: viewYear,
-      existingEntry: draftEntries[date],
+      existingEntry,
+      readOnly: locked,
     });
-  };
-
-  const handleSaveDraft = async () => {
-    if (Object.keys(draftEntries).length === 0) {
-      Alert.alert('Nothing to Save', 'Please plan at least one day before saving.');
-      return;
-    }
-    try {
-      dispatch(setSaving(true));
-      const details: TourPlanDetailInput[] = Object.values(draftEntries).map((e: any) => ({
-        planDate: e.date,
-        activityType: e.activityType,
-        routeId: e.routeId,
-        estimatedCalls: e.estimatedCalls,
-        notes: e.notes,
-        leaveType: e.leaveType,
-      }));
-      const saved = await tourPlanApi.createOrUpdate({ month: viewMonth, year: viewYear, details });
-      dispatch(setCurrentPlan(saved));
-      dispatch(loadDraftFromPlan(saved));
-      Alert.alert('Saved', 'Tour plan saved as draft.');
-    } catch (err: any) {
-      Alert.alert('Error', err?.response?.data?.message || 'Failed to save.');
-    } finally {
-      dispatch(setSaving(false));
-    }
   };
 
   const handleSubmit = async () => {
@@ -432,40 +447,37 @@ const MTPCalendarScreen: React.FC = () => {
             <Text style={styles.emptyTitle}>Weekend / Holiday</Text>
           </View>
         ) : hasPlan ? (
-          <View style={[
-            styles.planItem,
-            { borderLeftColor: detail ? STATUS_COLOR[planStatus] : '#f59e0b' },
-          ]}>
+          <TouchableOpacity
+            style={[
+              styles.planItem,
+              { borderLeftColor: detail ? STATUS_COLOR[planStatus] : '#f59e0b' },
+            ]}
+            onPress={() => navigateToDayForm(selectedDate)}
+            activeOpacity={0.7}
+          >
             <View style={styles.planItemHeader}>
               <Text style={styles.planItemTitle}>
                 {draft?.routeName ?? detail?.routeName ?? 'Field Day'}
               </Text>
-              <View style={[
-                styles.planBadge,
-                { backgroundColor: detail ? STATUS_BG[planStatus] : '#fef3c7' },
-              ]}>
-                <Text style={[
-                  styles.planBadgeText,
-                  { color: detail ? STATUS_COLOR[planStatus] : '#b45309' },
+              <View style={styles.planItemHeaderRight}>
+                <View style={[
+                  styles.planBadge,
+                  { backgroundColor: detail ? STATUS_BG[planStatus] : '#fef3c7' },
                 ]}>
-                  {detail ? STATUS_LABEL[planStatus] : 'Draft'}
-                </Text>
+                  <Text style={[
+                    styles.planBadgeText,
+                    { color: detail ? STATUS_COLOR[planStatus] : '#b45309' },
+                  ]}>
+                    {detail ? STATUS_LABEL[planStatus] : 'Draft'}
+                  </Text>
+                </View>
+                {canEdit && (
+                  <MaterialCommunityIcons name="pencil-outline" size={16} color={COLORS.textSecondary} />
+                )}
               </View>
             </View>
 
             <View style={styles.planItemDetails}>
-              {detail && (detail.plannedDoctorIds.length > 0 || detail.plannedChemistIds.length > 0) && (
-                <View style={styles.planDetailRow}>
-                  <MaterialCommunityIcons name="hospital-box-outline" size={15} color={COLORS.textSecondary} />
-                  <Text style={styles.planDetailText}>
-                    {[
-                      detail.plannedDoctorIds.length > 0 ? `${detail.plannedDoctorIds.length} Doctors` : '',
-                      detail.plannedChemistIds.length > 0 ? `${detail.plannedChemistIds.length} Chemists` : '',
-                    ].filter(Boolean).join(', ')}
-                  </Text>
-                </View>
-              )}
-
               {(detail?.estimatedCalls ?? draft?.estimatedCalls ?? 0) > 0 && (
                 <View style={styles.planDetailRow}>
                   <MaterialCommunityIcons name="phone-outline" size={15} color={COLORS.textSecondary} />
@@ -492,8 +504,26 @@ const MTPCalendarScreen: React.FC = () => {
                   </Text>
                 </View>
               ) : null}
+
+              {/* Contact list */}
+              {(draft?.plannedDoctorNames?.length ?? 0) > 0 && (
+                <View style={styles.contactSection}>
+                  <View style={styles.contactSectionHeader}>
+                    <MaterialCommunityIcons name="account-group-outline" size={15} color={COLORS.textSecondary} />
+                    <Text style={styles.contactSectionTitle}>
+                      {draft!.plannedDoctorNames!.length} Contact{draft!.plannedDoctorNames!.length > 1 ? 's' : ''} Planned
+                    </Text>
+                  </View>
+                  {draft!.plannedDoctorNames!.map((name, i) => (
+                    <View key={i} style={styles.contactRow}>
+                      <View style={styles.contactDot} />
+                      <Text style={styles.contactName} numberOfLines={1}>{name}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
-          </View>
+          </TouchableOpacity>
         ) : (
           <TouchableOpacity
             style={styles.emptyCard}
@@ -514,12 +544,14 @@ const MTPCalendarScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Save draft button (only in week view) */}
-        {canEdit && Object.keys(draftEntries).length > 0 && (
-          <TouchableOpacity style={styles.saveDraftBtn} onPress={handleSaveDraft} activeOpacity={0.85}>
-            <MaterialCommunityIcons name="content-save-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.saveDraftBtnText}>Save as Draft</Text>
-          </TouchableOpacity>
+        {/* Submit reminder — shown only on days that have a plan, while status is still DRAFT */}
+        {currentPlan && planStatus === 'DRAFT' && hasPlan && (
+          <View style={styles.infoBanner}>
+            <MaterialCommunityIcons name="information-outline" size={16} color="#1d4ed8" style={{ marginTop: 1 }} />
+            <Text style={styles.infoBannerText}>
+              Plan saved. Once you've planned all days, go to <Text style={styles.infoBannerBold}>Month</Text> view and tap <Text style={styles.infoBannerBold}>Submit Plan</Text> to send for approval.
+            </Text>
+          </View>
         )}
       </>
     );
@@ -592,18 +624,6 @@ const MTPCalendarScreen: React.FC = () => {
           </View>
         )}
 
-        {/* Save draft button */}
-        {canEdit && Object.keys(draftEntries).length > 0 && (
-          <TouchableOpacity
-            style={[styles.saveDraftBtn, { marginTop: SIZES.paddingMD }]}
-            onPress={handleSaveDraft}
-            activeOpacity={0.85}
-          >
-            <MaterialCommunityIcons name="content-save-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.saveDraftBtnText}>Save as Draft</Text>
-          </TouchableOpacity>
-        )}
-
         {/* Submit Plan for Approval button */}
         <TouchableOpacity
           style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
@@ -622,8 +642,8 @@ const MTPCalendarScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* Custom white header */}
-      <View style={styles.header}>
+      {/* Custom white header — paddingTop absorbs the status bar height */}
+      <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
         <Text style={styles.headerTitle}>Monthly Tour Plan</Text>
         <TouchableOpacity
           onPress={() => navigation.navigate('MTPSummary')}
@@ -676,8 +696,10 @@ const MTPCalendarScreen: React.FC = () => {
         </ScrollView>
       )}
 
-      {/* FAB */}
-      {canEdit && (
+      {/* FAB — only shown when the selected day has no plan yet */}
+      {canEdit && !draftEntries[selectedDate] && !currentPlan?.details?.find(
+        (d: TourPlanDetailResponse) => d.planDate.startsWith(selectedDate),
+      ) && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => navigateToDayForm(selectedDate)}
@@ -871,6 +893,11 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  planItemHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   planBadge: {
     paddingHorizontal: 10,
     paddingVertical: 3,
@@ -889,6 +916,43 @@ const styles = StyleSheet.create({
   planDetailText: {
     fontSize: SIZES.fontSM,
     color: COLORS.textSecondary,
+    flex: 1,
+  },
+
+  /* Contact list inside plan card */
+  contactSection: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    gap: 5,
+  },
+  contactSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: 2,
+  },
+  contactSectionTitle: {
+    fontSize: SIZES.fontSM,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  contactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingLeft: 4,
+  },
+  contactDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: COLORS.primary,
+  },
+  contactName: {
+    fontSize: SIZES.fontSM,
+    color: COLORS.textPrimary,
     flex: 1,
   },
 
@@ -930,24 +994,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-  /* Save draft button */
-  saveDraftBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginBottom: SIZES.paddingSM,
-    backgroundColor: COLORS.background,
-  },
-  saveDraftBtnText: {
-    fontSize: SIZES.fontMD,
-    fontWeight: '600',
-    color: COLORS.primary,
-  },
 
   /* Monthly — day headers */
   calDayHeaders: {
@@ -1074,6 +1120,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 10,
     elevation: 6,
+  },
+
+  /* Submit reminder banner */
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 12,
+    padding: SIZES.paddingMD,
+    marginBottom: SIZES.paddingSM,
+  },
+  infoBannerText: {
+    flex: 1,
+    fontSize: SIZES.fontSM,
+    color: '#1e40af',
+    lineHeight: 20,
+  },
+  infoBannerBold: {
+    fontWeight: '700',
   },
 });
 

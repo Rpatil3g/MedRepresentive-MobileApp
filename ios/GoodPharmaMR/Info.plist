@@ -34,6 +34,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>GoodPharma needs camera access to photograph expense receipts</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>GoodPharma needs photo library access to attach receipt images to expenses</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app needs your location to add doctors and track visits</string>
 	<key>NSLocationAlwaysUsageDescription</key>

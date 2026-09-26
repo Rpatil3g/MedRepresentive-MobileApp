@@ -495,8 +495,12 @@ const LogVisitScreen: React.FC = () => {
             caption: photo.caption || undefined,
           });
         } catch (uploadErr) {
-          console.error('Photo upload failed:', uploadErr);
-          showAlert('Photo Upload Failed', 'Could not upload one or more photos. Please check your connection and try again.');
+          const isTimeout = uploadErr instanceof Error && uploadErr.name === 'AbortError';
+          const errMsg = isTimeout
+            ? 'Upload timed out. Please check your network connection and try again.'
+            : uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+          console.error('Photo upload failed:', errMsg);
+          showAlert('Photo Upload Failed', errMsg);
           setSaving(false);
           return;
         }
@@ -523,7 +527,8 @@ const LogVisitScreen: React.FC = () => {
         photos: uploadedPhotos.length > 0 ? uploadedPhotos : undefined,
       });
       dispatch(addVisit(visit));
-      showAlert('Success', 'Visit logged successfully!', () => navigation.goBack());
+      navigation.goBack();
+      showAlert('Success', 'Visit logged successfully!');
     } catch (err: any) {
       showAlert('Error', err.response?.data?.message || 'Failed to save visit. Please try again.');
     } finally {

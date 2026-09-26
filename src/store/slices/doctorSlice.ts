@@ -11,7 +11,6 @@ interface DoctorState {
     specialty?: string;
     category?: string;
     city?: string;
-    territoryId?: string;
   };
   pagination: {
     currentPage: number;

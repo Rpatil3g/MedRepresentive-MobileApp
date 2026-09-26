@@ -19,6 +19,7 @@ export type MainTabParamList = {
   Visits: NavigatorScreenParams<VisitStackParamList>;
   DCR: NavigatorScreenParams<DCRStackParamList>;
   Doctors: NavigatorScreenParams<DoctorStackParamList>;
+  Expenses: NavigatorScreenParams<ExpenseStackParamList>;
 };
 
 // Attendance Stack
@@ -35,6 +36,7 @@ export type TourPlanStackParamList = {
     month: number;
     year: number;
     existingEntry?: import('./tourPlan.types').DraftDayEntry;
+    readOnly?: boolean;
   };
   MTPSummary: undefined;
 };
@@ -50,6 +52,8 @@ export type DoctorStackParamList = {
   DoctorList: undefined;
   DoctorDetail: { doctorId: string };
   AddDoctor: undefined;
+  AddChemist: undefined;
+  MySubmissions: undefined;
 };
 
 // Visit Stack
@@ -74,12 +78,21 @@ export type TaskStackParamList = {
   TaskDetail: { taskId: string };
 };
 
+// Expense Stack
+export type ExpenseStackParamList = {
+  ExpenseList: { date?: string } | undefined;
+  AddExpense: { date?: string } | undefined;
+  EditExpense: { expenseId: string };
+};
+
 // More Stack
 export type MoreStackParamList = {
   More: undefined;
   TaskList: undefined;
   TaskDetail: { taskId: string };
   ChangePassword: undefined;
+  HelpSupport: undefined;
+  About: undefined;
 };
 
 // Root Navigator

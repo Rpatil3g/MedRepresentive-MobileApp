@@ -7,9 +7,9 @@ import {
   RefreshControl,
   TouchableOpacity,
   StatusBar,
-  Platform,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
@@ -18,12 +18,13 @@ import DeviceInfo from 'react-native-device-info';
 import { Loading, ErrorMessage } from '../../components/common';
 import { useAppSelector } from '../../store/hooks';
 import { COLORS, SIZES } from '../../constants';
-import { visitApi, attendanceApi, tourPlanApi } from '../../services/api';
+import { visitApi, attendanceApi, tourPlanApi, expenseApi } from '../../services/api';
 import { showAlert, requestLocationPermission } from '../../utils/helpers';
 import { useAuth } from '../../hooks/useAuth';
 import { useLocationTracker } from '../../hooks/useLocationTracker';
 import { MainTabParamList } from '../../types/navigation.types';
 import { Visit } from '../../types/visit.types';
+import { TourPlanDetailResponse } from '../../types/tourPlan.types';
 
 type DashboardNavProp = BottomTabNavigationProp<MainTabParamList>;
 
@@ -38,13 +39,17 @@ interface QuickAction {
   label: string;
   color: string;
   bg: string;
+  badge?: number;
+  disabled?: boolean;
   onPress: () => void;
 }
 
 const DashboardScreen: React.FC = () => {
   const navigation = useNavigation<DashboardNavProp>();
+  const insets = useSafeAreaInsets();
   const { user } = useAppSelector((state) => state.auth);
   const { mrProfile } = useAppSelector((state) => state.user);
+  const headquartersName = mrProfile?.headquartersName || user?.headquartersName;
   const { logout } = useAuth();
 
   const [stats, setStats] = useState<DashboardStats>({
@@ -53,12 +58,14 @@ const DashboardScreen: React.FC = () => {
     targetVisits: 0,
   });
   const [todayVisits, setTodayVisits] = useState<Visit[]>([]);
+  const [todayPlan, setTodayPlan] = useState<TourPlanDetailResponse | null>(null);
   const [isPunchedIn, setIsPunchedIn] = useState(false);
   const [hasPunchedOut, setHasPunchedOut] = useState(false);
   const [punchLoading, setPunchLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rejectedExpensesCount, setRejectedExpensesCount] = useState(0);
 
   useLocationTracker(isPunchedIn);
 
@@ -67,11 +74,14 @@ const DashboardScreen: React.FC = () => {
       setError(null);
 
       const today = new Date();
-      const [visitsResponse, attendanceStatus, tourPlan] = await Promise.all([
+      const [visitsResponse, attendanceStatus, tourPlan, myExpenses] = await Promise.all([
         visitApi.getTodayVisits(),
         attendanceApi.getAttendanceStatus(),
         tourPlanApi.getMyPlanByMonth(today.getMonth() + 1, today.getFullYear()).catch(() => null),
+        expenseApi.getMyExpenses().catch(() => []),
       ]);
+
+      setRejectedExpensesCount(myExpenses.filter(e => e.status === 'Rejected').length);
 
       const visits: Visit[] = Array.isArray(visitsResponse) ? visitsResponse : [];
 
@@ -80,12 +90,13 @@ const DashboardScreen: React.FC = () => {
         .reduce((sum, v) => sum + (v.orderValue ?? 0), 0);
 
       const todayStr = today.toISOString().split('T')[0];
-      const todayPlan = tourPlan?.details?.find((d) => d.planDate.startsWith(todayStr));
-      const targetVisits = todayPlan
-        ? (todayPlan.plannedDoctorIds.length || todayPlan.estimatedCalls || 0)
+      const todayPlanDetail = tourPlan?.details?.find((d) => d.planDate.startsWith(todayStr)) ?? null;
+      const targetVisits = todayPlanDetail
+        ? (todayPlanDetail.plannedDoctorIds.length || todayPlanDetail.estimatedCalls || 0)
         : 0;
 
       setTodayVisits(visits);
+      setTodayPlan(todayPlanDetail);
       setStats((prev) => ({
         ...prev,
         todayVisits: visits.length,
@@ -250,18 +261,26 @@ const DashboardScreen: React.FC = () => {
       },
     },
     {
-      icon: 'cart-outline',
-      label: 'Take Order',
-      color: '#8b5cf6',
-      bg: '#ede9fe',
+      icon: 'clipboard-list-outline',
+      label: 'Show Visits',
+      color: '#0891b2',
+      bg: '#e0f2fe',
       onPress: () => navigation.navigate('Visits' as any, { screen: 'VisitList' } as any),
+    },
+    {
+      icon: 'doctor',
+      label: 'Doctors & Chemists',
+      color: '#7c3aed',
+      bg: '#ede9fe',
+      onPress: () => navigation.navigate('Doctors' as any, { screen: 'DoctorList' } as any),
     },
     {
       icon: 'receipt',
       label: 'Expenses',
       color: '#ea580c',
       bg: '#ffedd5',
-      onPress: () => {},   // Expenses module — wire up when screen is built
+      badge: rejectedExpensesCount > 0 ? rejectedExpensesCount : undefined,
+      onPress: () => navigation.navigate('Expenses' as any),
     },
   ];
 
@@ -283,15 +302,18 @@ const DashboardScreen: React.FC = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
       >
         {/* ── Blue App Header (inside ScrollView so negative margin card overlap works) ── */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: insets.top + 4 }]}>
           <View style={styles.headerTop}>
             <View>
               <Text style={styles.greeting}>{getGreeting()}</Text>
               <Text style={styles.userName}>{mrProfile?.fullName || user?.firstName || 'User'}</Text>
+              {headquartersName ? (
+                <View style={styles.hqRow}>
+                  <MaterialCommunityIcons name="office-building-marker-outline" size={14} color="rgba(255,255,255,0.85)" />
+                  <Text style={styles.hqText}>{headquartersName}</Text>
+                </View>
+              ) : null}
             </View>
-            <TouchableOpacity style={styles.notifBtn}>
-              <MaterialCommunityIcons name="bell-outline" size={22} color={COLORS.textWhite} />
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -366,12 +388,22 @@ const DashboardScreen: React.FC = () => {
             {quickActions.map((action) => (
               <TouchableOpacity
                 key={action.label}
-                style={styles.actionItem}
-                onPress={action.onPress}
-                activeOpacity={0.75}
+                style={[styles.actionItem, action.disabled && { opacity: 0.4 }]}
+                onPress={action.disabled ? undefined : action.onPress}
+                activeOpacity={action.disabled ? 1 : 0.75}
+                disabled={action.disabled}
               >
-                <View style={[styles.actionIcon, { backgroundColor: action.bg }]}>
-                  <MaterialCommunityIcons name={action.icon} size={26} color={action.color} />
+                <View style={styles.actionIconWrapper}>
+                  <View style={[styles.actionIcon, { backgroundColor: action.bg }]}>
+                    <MaterialCommunityIcons name={action.icon} size={26} color={action.color} />
+                  </View>
+                  {action.badge != null && (
+                    <View style={styles.actionBadge}>
+                      <Text style={styles.actionBadgeText}>
+                        {action.badge > 9 ? '9+' : action.badge}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={styles.actionLabel}>{action.label}</Text>
               </TouchableOpacity>
@@ -381,60 +413,55 @@ const DashboardScreen: React.FC = () => {
           {/* ── Today's Call Plan ── */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Today's Call Plan</Text>
-            <TouchableOpacity onPress={() => navigation.navigate('Visits' as any, { screen: 'VisitList' } as any)}>
-              <Text style={styles.sectionLink}>View All</Text>
+            <TouchableOpacity onPress={() => navigation.navigate('TourPlan' as any)}>
+              <Text style={styles.sectionLink}>View Plan</Text>
             </TouchableOpacity>
           </View>
 
-          {todayVisits.length === 0 ? (
+          {!todayPlan ? (
             <View style={styles.emptyCard}>
               <MaterialCommunityIcons name="calendar-blank-outline" size={36} color={COLORS.textDisabled} />
-              <Text style={styles.emptyTitle}>No visits logged today</Text>
-              <Text style={styles.emptySubtitle}>Tap "Log Visit" above to record your first call</Text>
+              <Text style={styles.emptyTitle}>No plan for today</Text>
+              <Text style={styles.emptySubtitle}>Add today's schedule in Tour Plan</Text>
+            </View>
+          ) : todayPlan.activityType !== 'FIELD_WORK' ? (
+            <View style={styles.emptyCard}>
+              <MaterialCommunityIcons name="briefcase-outline" size={36} color={COLORS.textDisabled} />
+              <Text style={styles.emptyTitle}>{todayPlan.activityType.replace('_', ' ')}</Text>
+              {todayPlan.notes ? <Text style={styles.emptySubtitle}>{todayPlan.notes}</Text> : null}
+            </View>
+          ) : todayPlan.plannedContactNames.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <MaterialCommunityIcons name="calendar-check-outline" size={36} color={COLORS.textDisabled} />
+              <Text style={styles.emptyTitle}>No doctors planned today</Text>
+              {todayPlan.estimatedCalls > 0 && (
+                <Text style={styles.emptySubtitle}>{todayPlan.estimatedCalls} estimated calls</Text>
+              )}
             </View>
           ) : (
-            todayVisits.slice(0, 5).map((visit) => {
-              const isDoctor = !!visit.doctorId;
-              const isStockist = !!visit.stockistId;
-              const partyName =
-                visit.doctorName ?? visit.chemistName ?? visit.stockistName ?? 'Unknown';
-              const subtitle = isDoctor
-                ? visit.doctorSpecialty || 'Doctor'
-                : isStockist
-                ? visit.stockistCompanyName || 'Stockist'
-                : visit.chemistShopName || 'Chemist';
-
-              const initials = partyName
-                .split(' ')
-                .slice(0, 2)
-                .map((w) => w[0])
-                .join('')
-                .toUpperCase();
-
-              const isDone = visit.status === 'Checked-Out' || visit.status === 'Completed';
-              const isActive = visit.status === 'Checked-In';
+            todayPlan.plannedContactNames.slice(0, 5).map((name, index) => {
+              const doctorId = todayPlan.plannedDoctorIds[index];
+              const visitForDoctor = todayVisits.find(v => v.doctorId === doctorId);
+              const isDone = visitForDoctor && (visitForDoctor.status === 'Checked-Out' || visitForDoctor.status === 'Completed');
+              const isActive = visitForDoctor?.status === 'Checked-In';
+              const initials = name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
 
               return (
-                <TouchableOpacity
-                  key={visit.id}
-                  style={styles.doctorCard}
-                  onPress={() => navigation.navigate('Visits' as any, { screen: 'VisitDetail', params: { visitId: visit.id } } as any)}
-                  activeOpacity={0.75}
-                >
+                <View key={doctorId || index} style={styles.doctorCard}>
                   {isDone ? (
                     <View style={styles.docAvatarDone}>
                       <MaterialCommunityIcons name="check" size={20} color="#047857" />
                     </View>
                   ) : (
-                    <View style={[styles.docAvatar, isActive && styles.docAvatarActive]}>
-                      <Text style={[styles.docAvatarText, isActive && styles.docAvatarTextActive]}>
+                    <View style={[styles.docAvatar, !!isActive && styles.docAvatarActive]}>
+                      <Text style={[styles.docAvatarText, !!isActive && styles.docAvatarTextActive]}>
                         {initials}
                       </Text>
                     </View>
                   )}
                   <View style={styles.docInfo}>
-                    <Text style={styles.docName}>{partyName}</Text>
-                    <Text style={styles.docSpec}>{subtitle}</Text>
+                    <Text style={styles.docName}>{name}</Text>
+                    <Text style={styles.docSpec}>Doctor</Text>
                   </View>
                   {isDone ? (
                     <View style={[styles.docBadge, styles.badgeDone]}>
@@ -449,7 +476,7 @@ const DashboardScreen: React.FC = () => {
                       <Text style={styles.badgePendingText}>Pending</Text>
                     </View>
                   )}
-                </TouchableOpacity>
+                </View>
               );
             })
           )}
@@ -478,12 +505,10 @@ const styles = StyleSheet.create({
 
   /* Header — lives inside ScrollView so the attendance card's negative margin
      correctly overlaps the header bottom in the same layout flow.
-     paddingTop accounts for Android status bar height; iOS uses safe area inset. */
+     paddingTop is applied inline using useSafeAreaInsets so it is exact on
+     every device (notches, Dynamic Island, gesture bars, etc.). */
   header: {
     backgroundColor: COLORS.primary,
-    paddingTop: Platform.OS === 'android'
-      ? (StatusBar.currentHeight ?? 24) - 10
-      : 34,
     paddingHorizontal: SIZES.paddingLG,
     paddingBottom: 44,
     borderBottomLeftRadius: 24,
@@ -506,13 +531,16 @@ const styles = StyleSheet.create({
     color: COLORS.textWhite,
     marginTop: 2,
   },
-  notifBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    justifyContent: 'center',
+  hqRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  hqText: {
+    fontSize: SIZES.fontSM,
+    color: 'rgba(255,255,255,0.85)',
+    fontWeight: '500',
   },
   scrollView: {
     flex: 1,
@@ -685,6 +713,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  actionIconWrapper: {
+    position: 'relative',
+  },
   actionIcon: {
     width: 56,
     height: 56,
@@ -696,6 +727,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
+  },
+  actionBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: COLORS.background,
+  },
+  actionBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textWhite,
   },
   actionLabel: {
     fontSize: SIZES.fontXS,

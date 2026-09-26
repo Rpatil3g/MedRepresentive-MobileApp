@@ -9,6 +9,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   ScrollView,
+  Image,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -155,10 +156,26 @@ const ProductListScreen: React.FC = () => {
       <Card style={styles.productCard}>
         <View style={styles.cardRow}>
           <View style={styles.iconContainer}>
-            <MaterialCommunityIcons name="pill" size={28} color={COLORS.primary} />
+            {item.brandImageUrl ? (
+              <Image
+                source={{ uri: item.brandImageUrl }}
+                style={styles.brandImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <MaterialCommunityIcons name="pill" size={28} color={COLORS.primary} />
+            )}
           </View>
           <View style={styles.productInfo}>
-            <Text style={styles.productName}>{item.productName}</Text>
+            <View style={styles.nameRow}>
+              <Text style={styles.productName} numberOfLines={1}>{item.productName}</Text>
+              {item.isCampaignProduct ? (
+                <View style={styles.campaignBadge}>
+                  <MaterialCommunityIcons name="star" size={10} color={COLORS.warning} />
+                  <Text style={styles.campaignBadgeText}>Focus</Text>
+                </View>
+              ) : null}
+            </View>
             {item.composition ? (
               <Text style={styles.composition} numberOfLines={1}>
                 {item.composition}
@@ -394,23 +411,50 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   iconContainer: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     borderRadius: SIZES.radiusMD,
     backgroundColor: COLORS.primaryLight,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: SIZES.paddingMD,
     flexShrink: 0,
+    overflow: 'hidden',
+  },
+  brandImage: {
+    width: 52,
+    height: 52,
   },
   productInfo: {
     flex: 1,
+    minWidth: 0,
+  },
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 2,
+  },
+  campaignBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: COLORS.warningLight,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: SIZES.radiusSM,
+    flexShrink: 0,
+  },
+  campaignBadgeText: {
+    fontSize: 10,
+    color: COLORS.warning,
+    fontWeight: '700',
   },
   productName: {
     fontSize: SIZES.fontLG,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginBottom: 2,
+    flexShrink: 1,
   },
   composition: {
     fontSize: SIZES.fontSM,

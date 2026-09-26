@@ -65,21 +65,6 @@ const MoreScreen: React.FC = () => {
         </View>
       </Card>
 
-      {/* Tasks Section */}
-      <Text style={styles.sectionTitle}>Tasks</Text>
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="clipboard-list"
-          title="All Tasks"
-          onPress={() => navigation.navigate('TaskList')}
-        />
-        <MenuItem
-          icon="alert-circle"
-          title="Overdue Tasks"
-          onPress={() => navigation.navigate('TaskList')}
-        />
-      </Card>
-
       {/* Account Section */}
       <Text style={styles.sectionTitle}>Account</Text>
       <Card style={styles.menuCard}>
@@ -88,45 +73,20 @@ const MoreScreen: React.FC = () => {
           title="Change Password"
           onPress={() => navigation.navigate('ChangePassword')}
         />
-        <MenuItem
-          icon="map-marker"
-          title="My Territories"
-          onPress={() => {}}
-        />
-      </Card>
-
-      {/* Reports Section */}
-      <Text style={styles.sectionTitle}>Reports</Text>
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="chart-line"
-          title="My Performance"
-          onPress={() => {}}
-        />
-        <MenuItem
-          icon="calendar-month"
-          title="Monthly Report"
-          onPress={() => {}}
-        />
       </Card>
 
       {/* Settings Section */}
       <Text style={styles.sectionTitle}>Settings</Text>
       <Card style={styles.menuCard}>
-        <MenuItem
-          icon="bell"
-          title="Notifications"
-          onPress={() => {}}
-        />
-        <MenuItem
+<MenuItem
           icon="help-circle"
           title="Help & Support"
-          onPress={() => {}}
+          onPress={() => navigation.navigate('HelpSupport')}
         />
         <MenuItem
           icon="information"
           title="About"
-          onPress={() => {}}
+          onPress={() => navigation.navigate('About')}
         />
       </Card>
 

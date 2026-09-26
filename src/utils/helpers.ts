@@ -3,7 +3,9 @@ import DeviceInfo from 'react-native-device-info';
 
 export const getDeviceId = async (): Promise<string> => {
   try {
-    const deviceId = await DeviceInfo.getUniqueId();
+    // syncUniqueId persists the ID to Keychain on iOS so it survives reinstalls.
+    // On Android it returns the stable Android ID unchanged.
+    const deviceId = await DeviceInfo.syncUniqueId();
     return deviceId;
   } catch (error) {
     console.error('Error getting device ID:', error);
@@ -87,6 +89,13 @@ export const showConfirm = (
 
 export const formatCurrency = (amount: number): string => {
   return `₹${amount.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+};
+
+// Doctor names are stored without the title; show "Dr." once (older records may already include it)
+export const DOCTOR_TITLE_REGEX = /^\s*dr\.?\s+/i;
+export const formatDoctorName = (name?: string | null): string => {
+  const clean = (name ?? '').replace(DOCTOR_TITLE_REGEX, '').trim();
+  return clean ? `Dr. ${clean}` : '';
 };
 
 export const truncateText = (text: string, maxLength: number): string => {

@@ -51,6 +51,11 @@ const tourPlanApi = {
     return response.data.canEdit;
   },
 
+  /** Remove the plan for a single date from the current user's draft */
+  clearDetail: async (date: string): Promise<void> => {
+    await axiosInstance.delete(`${BASE}/my-plan/details/${date}`);
+  },
+
   /** Get a plan by ID */
   getById: async (planId: string): Promise<TourPlanResponse> => {
     const response = await axiosInstance.get(`${BASE}/${planId}`);

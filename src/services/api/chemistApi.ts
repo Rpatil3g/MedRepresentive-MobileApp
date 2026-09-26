@@ -1,6 +1,6 @@
 import axiosInstance from './axiosInstance';
 import { API_CONFIG } from '../../config/api.config';
-import { Chemist } from '../../types/chemist.types';
+import { Chemist, CreateChemistRequest } from '../../types/chemist.types';
 
 const unwrapResponse = <T>(payload: T | { data?: T }): T => {
   if (
@@ -28,6 +28,14 @@ const normalizeChemist = (c: Chemist): Chemist => ({
 });
 
 class ChemistApi {
+  // Chemists this MR added, with their approval status (PENDING / APPROVED / REJECTED)
+  async getMySubmissions(): Promise<Chemist[]> {
+    const response = await axiosInstance.get<Chemist[] | { data?: Chemist[] }>(
+      API_CONFIG.ENDPOINTS.CHEMISTS_MY_SUBMISSIONS,
+    );
+    return unwrapResponse(response.data).map(normalizeChemist);
+  }
+
   async searchChemists(query: string): Promise<Chemist[]> {
     const response = await axiosInstance.get<Chemist[] | { data?: Chemist[] }>(
       `${API_CONFIG.ENDPOINTS.CHEMISTS_SEARCH}/${encodeURIComponent(query)}`,
@@ -38,6 +46,14 @@ class ChemistApi {
   async getChemistById(id: string): Promise<Chemist> {
     const response = await axiosInstance.get<Chemist | { data?: Chemist }>(
       `${API_CONFIG.ENDPOINTS.CHEMISTS}/${id}`,
+    );
+    return normalizeChemist(unwrapResponse(response.data));
+  }
+
+  async createChemist(data: CreateChemistRequest): Promise<Chemist> {
+    const response = await axiosInstance.post<Chemist | { data?: Chemist }>(
+      API_CONFIG.ENDPOINTS.CHEMISTS,
+      data,
     );
     return normalizeChemist(unwrapResponse(response.data));
   }

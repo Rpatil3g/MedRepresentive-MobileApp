@@ -13,6 +13,7 @@ import { Card, Loading, ErrorMessage } from '../../components/common';
 import { doctorApi } from '../../services/api';
 import { Doctor } from '../../types/doctor.types';
 import { DoctorStackParamList } from '../../types/navigation.types';
+import { formatDoctorName } from '../../utils/helpers';
 import { COLORS, SIZES } from '../../constants';
 
 type DoctorDetailRouteProp = RouteProp<DoctorStackParamList, 'DoctorDetail'>;
@@ -80,7 +81,7 @@ const DoctorDetailScreen: React.FC = () => {
         <View style={styles.avatarLarge}>
           <MaterialCommunityIcons name="doctor" size={64} color={COLORS.primary} />
         </View>
-        <Text style={styles.doctorName}>{doctor.doctorName}</Text>
+        <Text style={styles.doctorName}>{formatDoctorName(doctor.doctorName)}</Text>
         {doctor.qualification ? <Text style={styles.qualification}>{doctor.qualification}</Text> : null}
         {doctor.specialty ? (
           <View style={styles.specialtyBadge}>

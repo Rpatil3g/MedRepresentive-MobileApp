@@ -23,24 +23,6 @@ export interface MedicalRepProfile {
   isDeviceLocked?: boolean;
   lastLoginAt?: string;
   createdAt?: string;
-  territoryAssignments: TerritoryAssignment[];
 }
 
-export interface TerritoryAssignment {
-  id: string;
-  mrId: string;
-  territoryId: string;
-  territory: Territory;
-  assignedDate: string;
-  isActive: boolean;
-}
 
-export interface Territory {
-  id: string;
-  code: string;
-  name: string;
-  region?: string;
-  state?: string;
-  city?: string;
-  description?: string;
-}

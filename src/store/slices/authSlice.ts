@@ -57,6 +57,11 @@ const authSlice = createSlice({
     clearError: (state) => {
       state.error = null;
     },
+    clearMustChangePassword: (state) => {
+      if (state.user) {
+        state.user.mustChangePassword = false;
+      }
+    },
   },
 });
 
@@ -68,6 +73,7 @@ export const {
   updateTokens,
   updateUser,
   clearError,
+  clearMustChangePassword,
 } = authSlice.actions;
 
 export default authSlice.reducer;

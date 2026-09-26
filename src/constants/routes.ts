@@ -17,6 +17,8 @@ export const ROUTES = {
   DOCTOR_LIST: 'DoctorList',
   DOCTOR_DETAIL: 'DoctorDetail',
   ADD_DOCTOR: 'AddDoctor',
+  ADD_CHEMIST: 'AddChemist',
+  MY_SUBMISSIONS: 'MySubmissions',
   
   // Visit Stack
   VISIT_LIST: 'VisitList',
@@ -50,4 +52,10 @@ export const ROUTES = {
   // Profile Stack
   PROFILE: 'Profile',
   EDIT_PROFILE: 'EditProfile',
+
+  // Expense Stack
+  EXPENSES: 'Expenses',
+  EXPENSE_LIST: 'ExpenseList',
+  ADD_EXPENSE: 'AddExpense',
+  EDIT_EXPENSE: 'EditExpense',
 } as const;

@@ -121,11 +121,13 @@ export const useLocationTracker = (isPunchedIn: boolean): void => {
 
     // ── Start ───────────────────────────────────────────────────────────────
     if (Platform.OS === 'android') {
-      startForegroundService().then(() => {
-        // First ping immediately, then every 5 minutes
-        collectAndSend();
-        intervalRef.current = setInterval(collectAndSend, INTERVAL_MS);
-      });
+      startForegroundService()
+        .catch(() => { /* foreground service unavailable — fall through to interval anyway */ })
+        .then(() => {
+          // First ping immediately, then every 5 minutes
+          collectAndSend();
+          intervalRef.current = setInterval(collectAndSend, INTERVAL_MS);
+        });
 
       return () => {
         if (intervalRef.current !== null) {

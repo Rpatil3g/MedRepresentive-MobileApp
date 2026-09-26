@@ -24,6 +24,13 @@ export interface UserProfile {
   isActive: boolean;
   profileImageUrl?: string;
   lastLoginAt?: string;
+  mustChangePassword?: boolean;
+  employeeCode?: string;
+  headquartersId?: string;
+  headquartersName?: string;
+  reportingManagerId?: string;
+  reportingManagerName?: string;
+  isDeviceLocked?: boolean;
 }
 
 export interface ChangePasswordRequest {

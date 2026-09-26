@@ -3,19 +3,15 @@ import {
   TourPlanResponse,
   MonthlyPlanCalendar,
   DraftDayEntry,
-  PlanStatus,
 } from '../../types/tourPlan.types';
 
 interface TourPlanState {
-  // The saved plan fetched from server for the viewed month
   currentPlan: TourPlanResponse | null;
-  // Calendar data (all days of the month with plan details)
   calendar: MonthlyPlanCalendar | null;
-  // Local draft being built before saving
   draftEntries: Record<string, DraftDayEntry>; // keyed by 'YYYY-MM-DD'
-  // Which month/year is being viewed
   viewMonth: number;
   viewYear: number;
+  lastEditedDate: string | null; // set after saving a day plan so the calendar can scroll to it
   loading: boolean;
   saving: boolean;
   error: string | null;
@@ -29,6 +25,7 @@ const initialState: TourPlanState = {
   draftEntries: {},
   viewMonth: now.getMonth() + 1,
   viewYear: now.getFullYear(),
+  lastEditedDate: null,
   loading: false,
   saving: false,
   error: null,
@@ -59,19 +56,22 @@ const tourPlanSlice = createSlice({
       delete state.draftEntries[action.payload];
     },
     loadDraftFromPlan: (state, action: PayloadAction<TourPlanResponse>) => {
-      // Populate local draft entries from a saved DRAFT plan
       const entries: Record<string, DraftDayEntry> = {};
       for (const d of action.payload.details) {
         const dateKey = d.planDate.split('T')[0];
+        const existing = state.draftEntries[dateKey];
         entries[dateKey] = {
           date: dateKey,
           activityType: d.activityType,
+          // Fall back to locally-cached values when the server has no HQ for the day
+          hqId: d.headquartersId ?? existing?.hqId,
+          hqName: d.headquartersName ?? existing?.hqName,
           routeId: d.routeId,
           routeName: d.routeName,
-          territoryId: d.territoryId,
-          territoryName: d.territoryName,
           plannedDoctorIds: d.plannedDoctorIds,
+          plannedDoctorNames: d.plannedContactNames?.length ? d.plannedContactNames : existing?.plannedDoctorNames,
           focusProductIds: d.focusProductIds,
+          focusProductNames: existing?.focusProductNames,
           estimatedCalls: d.estimatedCalls,
           notes: d.notes,
           leaveType: d.leaveType,
@@ -81,6 +81,9 @@ const tourPlanSlice = createSlice({
     },
     clearDraft: (state) => {
       state.draftEntries = {};
+    },
+    setLastEditedDate: (state, action: PayloadAction<string | null>) => {
+      state.lastEditedDate = action.payload;
     },
     setLoading: (state, action: PayloadAction<boolean>) => {
       state.loading = action.payload;
@@ -102,6 +105,7 @@ export const {
   removeDraftEntry,
   loadDraftFromPlan,
   clearDraft,
+  setLastEditedDate,
   setLoading,
   setSaving,
   setError,
