@@ -13,3 +13,6 @@ export { default as expenseApi } from './expenseApi';
 export { default as liveTrackingApi } from './liveTrackingApi';
 export { default as storageApi } from './storageApi';
 export { default as stockistApi } from './stockistApi';
+export { default as orderApi } from './orderApi';
+export { default as targetApi } from './targetApi';
+export { default as alertsApi } from './alertsApi';

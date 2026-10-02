@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,19 +20,43 @@ import {
   upsertDraftEntry,
   removeDraftEntry,
   setLastEditedDate,
-  setCurrentPlan,
-  loadDraftFromPlan,
+  upsertPlan,
 } from '../../store/slices/tourPlanSlice';
 import axiosInstance from '../../services/api/axiosInstance';
 import tourPlanApi from '../../services/api/tourPlanApi';
 import { API_CONFIG } from '../../config/api.config';
 import { COLORS, SIZES } from '../../constants';
-import { formatDoctorName } from '../../utils/helpers';
-import { ActivityType, DraftDayEntry, LeaveType, TourPlanDetailInput } from '../../types/tourPlan.types';
+import { DOCTOR_TITLE_REGEX, formatDoctorName } from '../../utils/helpers';
+import {
+  ActivityType,
+  DraftDayEntry,
+  LeaveType,
+  PlannedContact,
+  TourPlanDetailInput,
+  contactLabel,
+  idsByKind,
+} from '../../types/tourPlan.types';
 import { TourPlanStackParamList } from '../../types/navigation.types';
 
 type RouteProps = RouteProp<TourPlanStackParamList, 'DayPlanForm'>;
-interface Option { id: string; name: string; }
+interface Option {
+  id: string;
+  name: string;
+  kind?: 'doctor' | 'chemist' | 'stockist';
+  lastVisitDate?: string;
+  /** Secondary line in search results, e.g. "Not planned this month · Last visit 12 Sep" */
+  hint?: string;
+  /** Doctor/chemist not planned on any day of this month yet */
+  highlight?: boolean;
+}
+
+// Planned contacts are stored with plain names; the picker shows them labelled ("Dr. X", "Y (Chemist)")
+const contactToOption = (c: PlannedContact): Option => ({ id: c.id, name: contactLabel(c), kind: c.kind });
+const optionToContact = (o: Option): PlannedContact => ({
+  id: o.id,
+  kind: o.kind ?? 'doctor',
+  name: o.name.replace(/ \((Chemist|Stockist)\)$/, '').replace(DOCTOR_TITLE_REGEX, '').trim(),
+});
 
 // ── Token colours matching the sample UI exactly ──────────────────────────────
 const C = {
@@ -224,7 +248,8 @@ const MultiSelect: React.FC<{
   onAdd: (o: Option) => void;
   onRemove: (id: string) => void;
   showAllOnEmpty?: boolean;
-}> = ({ searchPlaceholder, pillBg, pillColor, selected, onSearch, onAdd, onRemove, showAllOnEmpty }) => {
+  maxResults?: number;
+}> = ({ searchPlaceholder, pillBg, pillColor, selected, onSearch, onAdd, onRemove, showAllOnEmpty, maxResults = 8 }) => {
   const [query,   setQuery]   = useState('');
   const [results, setResults] = useState<Option[]>([]);
   const [busy,    setBusy]    = useState(false);
@@ -322,14 +347,23 @@ const MultiSelect: React.FC<{
 
       {/* Inline results — no Modal so keyboard stays up while user types */}
       {focused && results.length > 0 && (
-        <View style={f.inlineResults}>
-          {results.slice(0, 8).map(r => (
-            <TouchableOpacity key={r.id} style={f.menuItem} onPress={() => pick(r)}>
-              <Text style={f.menuItemText}>{r.name}</Text>
+        <ScrollView style={f.inlineResults} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+          {results.slice(0, maxResults).map(r => (
+            <TouchableOpacity
+              key={r.id}
+              style={[f.menuItem, r.highlight && f.menuItemHighlight]}
+              onPress={() => pick(r)}
+            >
+              <View style={f.menuItemBody}>
+                <Text style={[f.menuItemName, r.highlight && f.menuItemTextHighlight]}>{r.name}</Text>
+                {r.hint ? (
+                  <Text style={[f.menuItemHint, r.highlight && f.menuItemHintHighlight]}>{r.hint}</Text>
+                ) : null}
+              </View>
               <MaterialCommunityIcons name="plus-circle-outline" size={18} color={C.primary} />
             </TouchableOpacity>
           ))}
-        </View>
+        </ScrollView>
       )}
     </View>
   );
@@ -429,9 +463,7 @@ const DayPlanFormScreen: React.FC = () => {
 
   // Selected contacts (doctors / chemists / stockists)
   const [doctors, setDoctors] = useState<Option[]>(
-    (existingEntry?.plannedDoctorIds ?? []).map((id, i) => ({
-      id, name: existingEntry?.plannedDoctorNames?.[i] ?? id,
-    })),
+    (existingEntry?.plannedContacts ?? []).map(contactToOption),
   );
 
   // Campaign products — pre-loaded once
@@ -497,17 +529,22 @@ const DayPlanFormScreen: React.FC = () => {
 
       if (docRes.status === 'fulfilled') {
         listOf(docRes.value.data).forEach((d: any) =>
-          pool.push({ id: d.id, name: formatDoctorName(d.doctorName ?? d.name) }),
+          pool.push({ id: d.id, name: formatDoctorName(d.doctorName ?? d.name), kind: 'doctor', lastVisitDate: d.lastVisitDate }),
         );
       }
       if (chemRes.status === 'fulfilled') {
         listOf(chemRes.value.data).forEach((c: any) =>
-          pool.push({ id: c.id, name: `${c.chemistName ?? c.pharmacyName ?? c.name} (Chemist)` }),
+          pool.push({
+            id: c.id,
+            name: `${c.chemistName ?? c.pharmacyName ?? c.name} (Chemist)`,
+            kind: 'chemist',
+            lastVisitDate: c.lastVisitDate,
+          }),
         );
       }
       if (stkRes.status === 'fulfilled') {
         (stkRes.value.data?.items ?? stkRes.value.data?.data ?? stkRes.value.data ?? []).forEach((s: any) =>
-          pool.push({ id: s.id, name: `${s.stockistName ?? s.name} (Stockist)` }),
+          pool.push({ id: s.id, name: `${s.stockistName ?? s.name} (Stockist)`, kind: 'stockist' }),
         );
       }
       if (requestId !== contactsRequestRef.current) return;
@@ -588,11 +625,49 @@ const DayPlanFormScreen: React.FC = () => {
 
   // ── Search callbacks (filter pre-loaded pools) ────────────────────────────────
 
+  // Days of this month (other than the one being edited) each contact is already planned on
+  const plannedDaysByContact = useMemo(() => {
+    const map = new Map<string, number[]>();
+    (Object.values(draftEntries) as DraftDayEntry[]).forEach(e => {
+      if (e.date === date || e.activityType !== 'FIELD_WORK') return;
+      (e.plannedContacts ?? []).forEach(({ id }) => {
+        map.set(id, [...(map.get(id) ?? []), parseInt(e.date.slice(8, 10), 10)]);
+      });
+    });
+    map.forEach(days => days.sort((a, b) => a - b));
+    return map;
+  }, [draftEntries, date]);
+
+  // Pool annotated with coverage; doctors/chemists not planned yet this month come first
+  const coveragePool = useMemo(() => {
+    const selectedIds = new Set(doctors.map(d => d.id));
+    const fmtVisit = (iso?: string) => {
+      if (!iso) return 'Never visited';
+      const d = new Date(iso);
+      return `Last visit ${d.getDate()} ${MONTHS[d.getMonth()].slice(0, 3)}`;
+    };
+    const annotated = contactPool.map(c => {
+      if (c.kind === 'stockist') return c;
+      const days = plannedDaysByContact.get(c.id);
+      const planned = days
+        ? `Planned on ${days.slice(0, 4).join(', ')}${days.length > 4 ? '…' : ''}`
+        : 'Not planned this month';
+      return { ...c, highlight: !days && !selectedIds.has(c.id), hint: `${planned} · ${fmtVisit(c.lastVisitDate)}` };
+    });
+    return annotated.sort((a, b) => Number(!!b.highlight) - Number(!!a.highlight));
+  }, [contactPool, plannedDaysByContact, doctors]);
+
+  const routeCoverage = useMemo(() => {
+    const onRoute = coveragePool.filter(c => c.kind === 'doctor' || c.kind === 'chemist');
+    const unplanned = onRoute.filter(c => !plannedDaysByContact.has(c.id) && !doctors.some(d => d.id === c.id));
+    return { total: onRoute.length, unplanned: unplanned.length };
+  }, [coveragePool, plannedDaysByContact, doctors]);
+
   const searchContacts = useCallback(async (q: string): Promise<Option[]> => {
-    if (!q.trim()) return [];
+    if (!q.trim()) return coveragePool;
     const lower = q.toLowerCase();
-    return contactPool.filter(c => c.name.toLowerCase().includes(lower));
-  }, [contactPool]);
+    return coveragePool.filter(c => c.name.toLowerCase().includes(lower));
+  }, [coveragePool]);
 
   const searchProducts = useCallback(async (q: string): Promise<Option[]> => {
     if (!q.trim()) return campaignProducts;
@@ -633,8 +708,7 @@ const DayPlanFormScreen: React.FC = () => {
       hqName:             isFieldWork ? hq?.name       : undefined,
       routeId:            isFieldWork ? selRoute?.id   : undefined,
       routeName:          isFieldWork ? selRoute?.name : undefined,
-      plannedDoctorIds:   isFieldWork ? doctors.map(d => d.id)   : [],
-      plannedDoctorNames: isFieldWork ? doctors.map(d => d.name) : [],
+      plannedContacts:    isFieldWork ? doctors.map(optionToContact) : [],
       focusProductIds:    isFieldWork ? products.map(p => p.id)   : [],
       focusProductNames:  isFieldWork ? products.map(p => p.name) : [],
       estimatedCalls:     isFieldWork ? doctors.length : 0,
@@ -642,27 +716,26 @@ const DayPlanFormScreen: React.FC = () => {
       leaveType:          activityType === 'LEAVE' ? leaveType : undefined,
     };
 
-    // Merge with all existing draft entries for this month so previously planned
-    // days are not overwritten when we send the full list to the backend.
-    const allEntries: Record<string, DraftDayEntry> = { ...draftEntries, [date]: entry };
-    const details: TourPlanDetailInput[] = Object.values(allEntries).map((e: any) => ({
-      planDate:         e.date,
-      activityType:     e.activityType,
-      headquartersId:   e.hqId,
-      routeId:          e.routeId,
-      estimatedCalls:   e.estimatedCalls,
-      notes:            e.notes,
-      leaveType:        e.leaveType,
-      plannedDoctorIds: e.plannedDoctorIds ?? [],
-      focusProductIds:  e.focusProductIds  ?? [],
-    }));
+    // Send only this day: the server upserts by date (other days are never lost) and files it
+    // under the plan for its own week or month
+    const details: TourPlanDetailInput[] = [{
+      planDate:         entry.date,
+      activityType:     entry.activityType,
+      headquartersId:   entry.hqId,
+      routeId:          entry.routeId,
+      estimatedCalls:   entry.estimatedCalls,
+      notes:            entry.notes,
+      leaveType:        entry.leaveType,
+      // Doctors, chemists and stockists each go to their own list
+      ...idsByKind(entry.plannedContacts),
+      focusProductIds:  entry.focusProductIds ?? [],
+    }];
 
     try {
       setSaving(true);
       dispatch(upsertDraftEntry(entry));
       const saved = await tourPlanApi.createOrUpdate({ month: planMonth, year: planYear, details });
-      dispatch(setCurrentPlan(saved));
-      dispatch(loadDraftFromPlan(saved));
+      dispatch(upsertPlan(saved));
       dispatch(setLastEditedDate(date));
       navigation.goBack();
     } catch (err: any) {
@@ -768,7 +841,23 @@ const DayPlanFormScreen: React.FC = () => {
                   onSearch={searchContacts}
                   onAdd={o => setDoctors(prev => [...prev, o])}
                   onRemove={id => setDoctors(prev => prev.filter(d => d.id !== id))}
+                  showAllOnEmpty
+                  maxResults={50}
                 />
+                {!!selRoute && !showAllInHQ && !loadingContacts && routeCoverage.total > 0 && (
+                  <View style={[s.coverage, routeCoverage.unplanned === 0 && s.coverageDone]}>
+                    <MaterialCommunityIcons
+                      name={routeCoverage.unplanned === 0 ? 'check-circle-outline' : 'alert-circle-outline'}
+                      size={16}
+                      color={routeCoverage.unplanned === 0 ? '#047857' : '#b45309'}
+                    />
+                    <Text style={[s.coverageText, routeCoverage.unplanned === 0 && s.coverageTextDone]}>
+                      {routeCoverage.unplanned === 0
+                        ? 'Every doctor & chemist on this route is planned this month'
+                        : `${routeCoverage.unplanned} of ${routeCoverage.total} on this route not planned yet this month — highlighted in the list`}
+                    </Text>
+                  </View>
+                )}
                 {!!selRoute && !readOnly && (
                   <TouchableOpacity style={s.toggleRow} onPress={toggleShowAllInHQ} activeOpacity={0.7}>
                     <MaterialCommunityIcons
@@ -888,6 +977,7 @@ const f = StyleSheet.create({
   // Inline search results (MultiSelect) — rendered in document flow so keyboard stays up
   inlineResults: {
     marginTop: 4,
+    maxHeight: 320,
     backgroundColor: C.cardBg,
     borderWidth: 1, borderColor: C.border,
     borderRadius: SIZES.radiusMD,
@@ -920,6 +1010,13 @@ const f = StyleSheet.create({
   menuItem:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: SIZES.paddingMD, borderBottomWidth: 1, borderBottomColor: C.border },
   menuItemActive:   { backgroundColor: `${C.primary}0F` },
   menuItemText:     { fontSize: SIZES.fontMD, color: C.textDark, flex: 1 },
+  menuItemBody:     { flex: 1, marginRight: 8 },
+  // No flex here: inside the column body, flex: 1 collapses the name to zero height when a hint is shown
+  menuItemName:     { fontSize: SIZES.fontMD, color: C.textDark },
+  menuItemHighlight:      { backgroundColor: '#fffbeb', borderLeftWidth: 3, borderLeftColor: '#f59e0b' },
+  menuItemTextHighlight:  { fontWeight: '600' },
+  menuItemHint:           { fontSize: SIZES.fontXS, color: C.textMuted, marginTop: 2 },
+  menuItemHintHighlight:  { color: '#b45309' },
   menuItemTextActive: { color: C.primary, fontWeight: '600' },
 
   // Pills
@@ -948,6 +1045,10 @@ const f = StyleSheet.create({
 const s = StyleSheet.create({
   page:   { flex: 1, backgroundColor: C.pageBg },
   toggleRow:  { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  coverage:         { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, padding: 8, borderRadius: SIZES.radiusMD, backgroundColor: '#fffbeb' },
+  coverageDone:     { backgroundColor: '#ecfdf5' },
+  coverageText:     { flex: 1, fontSize: SIZES.fontSM, color: '#b45309' },
+  coverageTextDone: { color: '#047857' },
   toggleText: { fontSize: SIZES.fontSM, color: C.textMuted },
   scroll: { padding: SIZES.paddingMD, paddingBottom: 120 },
 

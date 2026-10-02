@@ -98,6 +98,8 @@ export interface CreateVisitRequest {
   checkInTime?: string;
   latitude?: number;
   longitude?: number;
+  /** Place name for latitude/longitude, shown with the visit's photos on the web portal */
+  visitAddress?: string;
   isPlannedVisit: boolean;
   visitDurationMinutes?: number;
   visitType?: string;

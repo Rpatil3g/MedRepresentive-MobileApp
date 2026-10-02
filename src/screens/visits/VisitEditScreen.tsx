@@ -30,7 +30,7 @@ interface SampleItem {
   quantity: number;
 }
 
-const FALLBACK_CALL_TYPES    = ['Routine', 'Follow Up', 'Campaign', 'Cold Call'];
+const FALLBACK_CALL_TYPES    = ['Routine', 'Follow Up', 'Campaign', 'Cold Call', 'Celebration'];
 const FALLBACK_VISIT_OUTCOMES = ['Met', 'Not Available', 'Busy / Refused', 'On Leave'];
 
 // ── Reusable Picker Modal ────────────────────────────────────────────────────
@@ -327,45 +327,18 @@ const VisitEditScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Order Booked */}
-          <View style={styles.group}>
-            <SectionLabel label="Is Order Booked?" />
-            <View style={styles.radioRow}>
-              <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(true)}>
-                <MaterialCommunityIcons
-                  name={isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
-                  size={22}
-                  color={isOrderBooked ? COLORS.primary : COLORS.textSecondary}
-                />
-                <Text style={styles.radioLabel}>Yes</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(false)}>
-                <MaterialCommunityIcons
-                  name={!isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
-                  size={22}
-                  color={!isOrderBooked ? COLORS.primary : COLORS.textSecondary}
-                />
-                <Text style={styles.radioLabel}>No</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {isOrderBooked && (
+          {/* Orders — read-only here; booked and cancelled from the Orders screen */}
+          {isOrderBooked && orderValue ? (
             <View style={styles.group}>
-              <SectionLabel label="Order Value (₹)" />
+              <SectionLabel label="Order Booked" />
               <View style={styles.inputRow}>
-                <Text style={[styles.inputText, { color: COLORS.textSecondary }]}>₹</Text>
-                <TextInput
-                  style={[styles.innerInput, { marginLeft: 4 }]}
-                  placeholder="Enter total amount..."
-                  placeholderTextColor={COLORS.textSecondary}
-                  keyboardType="decimal-pad"
-                  value={orderValue}
-                  onChangeText={setOrderValue}
-                />
+                <MaterialCommunityIcons name="cart-check" size={18} color={COLORS.success} />
+                <Text style={[styles.inputText, { marginLeft: 6 }]}>
+                  ₹{parseFloat(orderValue).toLocaleString('en-IN')}
+                </Text>
               </View>
             </View>
-          )}
+          ) : null}
 
           {/* Remarks */}
           <View style={styles.group}>

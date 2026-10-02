@@ -88,13 +88,17 @@ const AttendanceScreen: React.FC = () => {
             <Text style={styles.punchTime}>
               {record?.punchOutTime ? formatTime(record.punchOutTime) : '--:--'}
             </Text>
+            {record?.isAutoPunchOut && <Text style={styles.missedTag}>Punch-out missed</Text>}
           </View>
         </View>
 
         {record?.workDurationFormatted && (
           <View style={styles.durationRow}>
             <MaterialCommunityIcons name="timer-outline" size={18} color={COLORS.primary} />
-            <Text style={styles.durationText}>Work Duration: {record.workDurationFormatted}</Text>
+            <Text style={styles.durationText}>
+              Work Duration: {record.workDurationFormatted}
+              {record.dayStatus ? ` · ${record.dayStatus}` : ''}
+            </Text>
           </View>
         )}
       </Card>
@@ -184,6 +188,16 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontXS,
     color: COLORS.textWhite,
     backgroundColor: COLORS.warning,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 4,
+    overflow: 'hidden',
+  },
+  missedTag: {
+    fontSize: SIZES.fontXS,
+    color: COLORS.textWhite,
+    backgroundColor: COLORS.error,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,

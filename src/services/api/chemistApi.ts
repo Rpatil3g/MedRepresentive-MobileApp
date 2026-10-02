@@ -36,6 +36,26 @@ class ChemistApi {
     return unwrapResponse(response.data).map(normalizeChemist);
   }
 
+  /**
+   * Approved, active chemists — in the given HQ (including ones not yet on a route) when an
+   * HQ is passed, otherwise the first page A–Z. Used to show a list before the MR types.
+   */
+  async listChemists(headquartersId?: string, pageSize = 100): Promise<Chemist[]> {
+    const response = await axiosInstance.get<{ items?: Chemist[] } | { data?: { items?: Chemist[] } }>(
+      API_CONFIG.ENDPOINTS.CHEMISTS,
+      {
+        params: {
+          headquartersId,
+          includeUnassigned: !!headquartersId,
+          isActive: true,
+          pageSize,
+        },
+      },
+    );
+    const page = unwrapResponse(response.data as any) as { items?: Chemist[] };
+    return (page?.items ?? []).map(normalizeChemist);
+  }
+
   async searchChemists(query: string): Promise<Chemist[]> {
     const response = await axiosInstance.get<Chemist[] | { data?: Chemist[] }>(
       `${API_CONFIG.ENDPOINTS.CHEMISTS_SEARCH}/${encodeURIComponent(query)}`,

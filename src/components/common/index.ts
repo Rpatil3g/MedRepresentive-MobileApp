@@ -6,3 +6,5 @@ export { default as ErrorMessage } from './ErrorMessage';
 export { default as Avatar } from './Avatar';
 
 export { default as HqRoutePicker } from './HqRoutePicker';
+export { default as SelectField } from './SelectField';
+export { default as CollapsibleSection } from './CollapsibleSection';

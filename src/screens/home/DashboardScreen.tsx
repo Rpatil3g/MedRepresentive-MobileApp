@@ -13,24 +13,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import Geolocation from 'react-native-geolocation-service';
-import DeviceInfo from 'react-native-device-info';
 import { Loading, ErrorMessage } from '../../components/common';
 import { useAppSelector } from '../../store/hooks';
-import { COLORS, SIZES } from '../../constants';
-import { visitApi, attendanceApi, tourPlanApi, expenseApi } from '../../services/api';
+import { format, subDays } from 'date-fns';
+import { COLORS, SIZES, EXPENSE_ATTENTION_WINDOW_DAYS } from '../../constants';
+import { visitApi, attendanceApi, tourPlanApi, expenseApi, targetApi } from '../../services/api';
 import { showAlert, requestLocationPermission } from '../../utils/helpers';
+import { capturePunchLocation, formatWorked, punchErrorMessage, punchInNow } from '../../utils/punch';
 import { useAuth } from '../../hooks/useAuth';
 import { useLocationTracker } from '../../hooks/useLocationTracker';
 import { MainTabParamList } from '../../types/navigation.types';
 import { Visit } from '../../types/visit.types';
-import { TourPlanDetailResponse } from '../../types/tourPlan.types';
+import { TourPlanDetailResponse, contactLabel, contactsOfDetail } from '../../types/tourPlan.types';
+import { MyTargets } from '../../types/target.types';
+import { formatINRShort } from '../orders/orderMeta';
 
 type DashboardNavProp = BottomTabNavigationProp<MainTabParamList>;
 
+// Call plan contacts shown before the "+N more" row
+const PLAN_CONTACTS_PREVIEW = 5;
+
 interface DashboardStats {
   todayVisits: number;
-  orderValue: number;
   targetVisits: number;
 }
 
@@ -54,45 +58,61 @@ const DashboardScreen: React.FC = () => {
 
   const [stats, setStats] = useState<DashboardStats>({
     todayVisits: 0,
-    orderValue: 0,
     targetVisits: 0,
   });
+  const [monthTargets, setMonthTargets] = useState<MyTargets | null>(null);
   const [todayVisits, setTodayVisits] = useState<Visit[]>([]);
   const [todayPlan, setTodayPlan] = useState<TourPlanDetailResponse | null>(null);
+  const [showAllPlanContacts, setShowAllPlanContacts] = useState(false);
   const [isPunchedIn, setIsPunchedIn] = useState(false);
   const [hasPunchedOut, setHasPunchedOut] = useState(false);
+  // Today was closed by the server because the MR didn't punch out
+  const [isAutoPunchOut, setIsAutoPunchOut] = useState(false);
+  const [punchOutReminderAtUtc, setPunchOutReminderAtUtc] = useState<string | undefined>(undefined);
   const [punchLoading, setPunchLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rejectedExpensesCount, setRejectedExpensesCount] = useState(0);
 
-  useLocationTracker(isPunchedIn);
+  // The server ends the day (auto punch-out) → stop tracking and show the day as closed
+  const handleDayClosedByServer = useCallback(() => {
+    setIsPunchedIn(false);
+    setHasPunchedOut(true);
+  }, []);
+
+  useLocationTracker(isPunchedIn, { punchOutReminderAtUtc, onDayClosed: handleDayClosedByServer });
 
   const fetchDashboardData = useCallback(async () => {
     try {
       setError(null);
 
       const today = new Date();
-      const [visitsResponse, attendanceStatus, tourPlan, myExpenses] = await Promise.all([
+      // Local date — toISOString() would give yesterday before 5:30 am IST
+      const todayStr = format(today, 'yyyy-MM-dd');
+      const [visitsResponse, attendanceStatus, todaysPlans, myExpenses, targets] = await Promise.all([
         visitApi.getTodayVisits(),
         attendanceApi.getAttendanceStatus(),
-        tourPlanApi.getMyPlanByMonth(today.getMonth() + 1, today.getFullYear()).catch(() => null),
-        expenseApi.getMyExpenses().catch(() => []),
+        // The plan holding today — a monthly or a weekly plan
+        tourPlanApi.getMyPlans(todayStr, todayStr).catch(() => []),
+        // Same window as the Expenses red dot, so the badge and the dot agree
+        expenseApi.getMyExpenses({
+          fromDate: format(subDays(today, EXPENSE_ATTENTION_WINDOW_DAYS), 'yyyy-MM-dd'),
+          status: 'Rejected',
+        }).catch(() => []),
+        targetApi.getMyTargets(today.getFullYear(), today.getMonth() + 1).catch(() => null),
       ]);
 
-      setRejectedExpensesCount(myExpenses.filter(e => e.status === 'Rejected').length);
+      setRejectedExpensesCount(myExpenses.length);
+      setMonthTargets(targets);
 
       const visits: Visit[] = Array.isArray(visitsResponse) ? visitsResponse : [];
 
-      const totalOrderValue = visits
-        .filter((v) => v.isOrderBooked && v.orderValue)
-        .reduce((sum, v) => sum + (v.orderValue ?? 0), 0);
-
-      const todayStr = today.toISOString().split('T')[0];
-      const todayPlanDetail = tourPlan?.details?.find((d) => d.planDate.startsWith(todayStr)) ?? null;
+      const todayPlanDetail = todaysPlans
+        .flatMap((p) => p.details ?? [])
+        .find((d) => d.planDate.startsWith(todayStr)) ?? null;
       const targetVisits = todayPlanDetail
-        ? (todayPlanDetail.plannedDoctorIds.length || todayPlanDetail.estimatedCalls || 0)
+        ? (contactsOfDetail(todayPlanDetail).length || todayPlanDetail.estimatedCalls || 0)
         : 0;
 
       setTodayVisits(visits);
@@ -100,11 +120,12 @@ const DashboardScreen: React.FC = () => {
       setStats((prev) => ({
         ...prev,
         todayVisits: visits.length,
-        orderValue: totalOrderValue,
         targetVisits,
       }));
       setIsPunchedIn(attendanceStatus.hasPunchedIn && !attendanceStatus.hasPunchedOut);
       setHasPunchedOut(attendanceStatus.hasPunchedOut);
+      setIsAutoPunchOut(!!attendanceStatus.isAutoPunchOut);
+      setPunchOutReminderAtUtc(attendanceStatus.punchOutReminderAtUtc);
     } catch (fetchError) {
       console.error('Dashboard fetch error:', fetchError);
       setError('Failed to load dashboard data');
@@ -114,90 +135,75 @@ const DashboardScreen: React.FC = () => {
     }
   }, []);
 
-  const getCurrentLocation = (): Promise<{ latitude: number; longitude: number; address?: string }> =>
-    new Promise((resolve, reject) => {
-      Geolocation.getCurrentPosition(
-        async (pos) => {
-          const { latitude, longitude } = pos.coords;
-          let address: string | undefined;
-          try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
-              { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } }
-            );
-            const data = await res.json();
-            address = data.display_name as string | undefined;
-          } catch {
-            // address stays undefined — coordinates-only is still valid
-          }
-          resolve({ latitude, longitude, address });
-        },
-        (err) => reject(new Error(`Location error: ${err.message}`)),
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 },
-      );
-    });
-
   const handlePunch = useCallback(async () => {
     if (punchLoading) return;
 
-    // Accidental punch-out guard
+    // Punch-out: confirm, telling the MR up front if the day will count as a half day or absent
     if (isPunchedIn) {
-      Alert.alert(
-        'Punch Out?',
-        'Are you sure you want to punch out? This will mark your work day as ended.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Punch Out',
-            style: 'destructive',
-            onPress: () => executePunch('out'),
-          },
-        ],
-      );
+      let message = 'Are you sure you want to punch out? This will mark your work day as ended.';
+      try {
+        const preview = await attendanceApi.getPunchOutPreview();
+        const worked = formatWorked(preview.workedMinutes);
+        if (preview.dayStatus === 'Half Day') {
+          message = `You've worked ${worked}. Punching out now marks today as a HALF DAY `
+            + `(a full day needs ${preview.fullDayMinHours} hours).`;
+        } else if (preview.dayStatus === 'Absent') {
+          message = `You've worked ${worked}. Punching out now marks today as ABSENT `
+            + `(a half day needs ${preview.halfDayMinHours} hours).`;
+        } else {
+          message = `You've worked ${worked} today. Punch out and end your work day?`;
+        }
+      } catch {
+        // Preview unavailable (e.g. offline) — fall back to the plain confirmation
+      }
+
+      Alert.alert('Punch Out?', message, [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Punch Out', style: 'destructive', onPress: () => executePunch('out') },
+      ]);
       return;
     }
 
     // Day already completed guard
     if (hasPunchedOut) {
-      showAlert('Already Punched Out', 'You have already completed your attendance for today.');
+      showAlert(
+        'Already Punched Out',
+        isAutoPunchOut
+          ? "You didn't punch out, so today was closed automatically at your last activity."
+          : 'You have already completed your attendance for today.',
+      );
       return;
     }
 
     executePunch('in');
-  }, [isPunchedIn, hasPunchedOut, punchLoading]);
+  }, [isPunchedIn, hasPunchedOut, isAutoPunchOut, punchLoading]);
 
   const executePunch = async (type: 'in' | 'out') => {
-    const hasPermission = await requestLocationPermission();
-    if (!hasPermission) {
-      showAlert('Permission Denied', 'Location permission is required to punch in/out.');
-      return;
-    }
-
     setPunchLoading(true);
     try {
-      const location = await getCurrentLocation();
-      const timestamp = new Date().toISOString();
-
       if (type === 'in') {
-        let batteryLevel: number | undefined;
-        try {
-          batteryLevel = Math.round((await DeviceInfo.getBatteryLevel()) * 100);
-        } catch { /* non-critical */ }
-        await attendanceApi.punchIn({ timestamp, ...location, batteryLevel });
+        await punchInNow();
         setIsPunchedIn(true);
         showAlert('Punched In', 'Your attendance has been recorded. Have a productive day!');
+        fetchDashboardData(); // picks up today's punch-out reminder time
       } else {
-        await attendanceApi.punchOut({ timestamp, ...location });
+        const hasPermission = await requestLocationPermission();
+        if (!hasPermission) {
+          showAlert('Permission Denied', 'Location permission is required to punch out.');
+          return;
+        }
+        const location = await capturePunchLocation();
+        const record = await attendanceApi.punchOut({ timestamp: new Date().toISOString(), ...location });
         setIsPunchedIn(false);
         setHasPunchedOut(true);
-        showAlert('Punched Out', 'Your work day has been recorded successfully.');
+        const worked = record.workDurationMinutes != null ? ` (${formatWorked(record.workDurationMinutes)})` : '';
+        showAlert(
+          'Punched Out',
+          record.dayStatus ? `Today is recorded as ${record.dayStatus}${worked}.` : 'Your work day has been recorded successfully.',
+        );
       }
     } catch (err: any) {
-      const isNetworkError = !err?.response && (err?.message === 'Network Error' || err?.code === 'ECONNABORTED');
-      const msg = isNetworkError
-        ? 'No internet connection. Please check your network and try again.'
-        : err?.response?.data?.message ?? err?.message ?? 'Something went wrong';
-      showAlert('Attendance Error', msg);
+      showAlert('Attendance Error', punchErrorMessage(err));
     } finally {
       setPunchLoading(false);
     }
@@ -225,13 +231,17 @@ const DashboardScreen: React.FC = () => {
     ? Math.min((stats.todayVisits / stats.targetVisits) * 100, 100)
     : 0;
 
-  const orderValueProgress = Math.min((stats.orderValue / 20000) * 100, 100);
-
-  const formatOrderValue = (value: number): string => {
-    if (value >= 100000) return `₹ ${(value / 100000).toFixed(1)}L`;
-    if (value >= 1000) return `₹ ${(value / 1000).toFixed(1)}k`;
-    return `₹ ${value.toFixed(0)}`;
-  };
+  // Monthly targets are set by the manager; bars stay empty when no target is set.
+  // Achievement: sales = dispatched orders, visits = outcome "Met".
+  const monthSales = monthTargets?.actualSales ?? 0;
+  const salesTarget = monthTargets?.salesTarget ?? 0;
+  const salesProgress = salesTarget > 0 ? Math.min((monthSales / salesTarget) * 100, 100) : 0;
+  const monthVisits = monthTargets?.actualVisits ?? 0;
+  const visitTarget = monthTargets?.visitTarget ?? 0;
+  const monthVisitProgress = visitTarget > 0 ? Math.min((monthVisits / visitTarget) * 100, 100) : 0;
+  const goToOrders = () => navigation.navigate('Orders' as any, { screen: 'OrderList' } as any);
+  const goToTargets = () => navigation.navigate('Orders' as any, { screen: 'MyTargets', initial: false } as any);
+  const pendingSales = monthTargets?.pendingSales ?? 0;
 
   const quickActions: QuickAction[] = [
     {
@@ -239,7 +249,12 @@ const DashboardScreen: React.FC = () => {
       label: 'Log Visit',
       color: COLORS.primary,
       bg: COLORS.primaryLight,
-      onPress: () => navigation.navigate('Visits' as any, { screen: 'LogVisit' } as any),
+      // initial: false keeps Visit List as the base of the Visits stack, so Back never lands on a stale Log Visit
+      onPress: () => navigation.navigate('Visits' as any, {
+        screen: 'LogVisit',
+        params: { returnTo: 'Dashboard' },
+        initial: false,
+      } as any),
     },
     {
       icon: 'clipboard-check-outline',
@@ -266,6 +281,13 @@ const DashboardScreen: React.FC = () => {
       color: '#0891b2',
       bg: '#e0f2fe',
       onPress: () => navigation.navigate('Visits' as any, { screen: 'VisitList' } as any),
+    },
+    {
+      icon: 'cart-outline',
+      label: 'Orders',
+      color: '#be185d',
+      bg: '#fce7f3',
+      onPress: goToOrders,
     },
     {
       icon: 'doctor',
@@ -369,17 +391,53 @@ const DashboardScreen: React.FC = () => {
               </View>
             </View>
 
-            {/* Order Value */}
-            <View style={styles.metricCard}>
+            {/* Sales achieved (dispatched) this month vs target */}
+            <TouchableOpacity style={styles.metricCard} onPress={goToTargets} activeOpacity={0.8}>
               <View style={[styles.metricIconBox, { backgroundColor: '#fce7f3' }]}>
                 <MaterialCommunityIcons name="currency-inr" size={18} color="#be185d" />
               </View>
-              <Text style={styles.metricLabel}>Order Value</Text>
-              <Text style={styles.metricValue}>{formatOrderValue(stats.orderValue)}</Text>
+              <Text style={styles.metricLabel}>Sales Achieved</Text>
+              <Text style={styles.metricValue} numberOfLines={1}>
+                {formatINRShort(monthSales)}
+                {salesTarget > 0 && (
+                  <Text style={styles.metricTarget}> / {formatINRShort(salesTarget)}</Text>
+                )}
+              </Text>
               <View style={styles.progressBar}>
-                <View style={[styles.progressFill, { width: `${orderValueProgress}%`, backgroundColor: '#be185d' }]} />
+                <View style={[styles.progressFill, { width: `${salesProgress}%`, backgroundColor: '#be185d' }]} />
               </View>
-            </View>
+            </TouchableOpacity>
+
+            {/* Met visits this month vs target */}
+            <TouchableOpacity style={styles.metricCard} onPress={goToTargets} activeOpacity={0.8}>
+              <View style={[styles.metricIconBox, { backgroundColor: '#dcfce7' }]}>
+                <MaterialCommunityIcons name="calendar-check" size={18} color="#15803d" />
+              </View>
+              <Text style={styles.metricLabel}>Met Visits (Month)</Text>
+              <Text style={styles.metricValue}>
+                {monthVisits}
+                {visitTarget > 0 && (
+                  <Text style={styles.metricTarget}> / {visitTarget}</Text>
+                )}
+              </Text>
+              <View style={styles.progressBar}>
+                <View style={[styles.progressFill, { width: `${monthVisitProgress}%`, backgroundColor: '#15803d' }]} />
+              </View>
+            </TouchableOpacity>
+
+            {/* Orders this month */}
+            <TouchableOpacity style={styles.metricCard} onPress={goToOrders} activeOpacity={0.8}>
+              <View style={[styles.metricIconBox, { backgroundColor: '#fef3c7' }]}>
+                <MaterialCommunityIcons name="cart-outline" size={18} color="#b45309" />
+              </View>
+              <Text style={styles.metricLabel}>Orders This Month</Text>
+              <Text style={styles.metricValue}>{monthTargets?.orderCount ?? 0}</Text>
+              <Text style={styles.metricCaption} numberOfLines={1}>
+                {pendingSales > 0
+                  ? `${formatINRShort(pendingSales)} awaiting dispatch`
+                  : salesTarget > 0 || visitTarget > 0 ? 'Targets set by your manager' : 'No targets set this month'}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* ── Quick Actions ── */}
@@ -430,24 +488,54 @@ const DashboardScreen: React.FC = () => {
               <Text style={styles.emptyTitle}>{todayPlan.activityType.replace('_', ' ')}</Text>
               {todayPlan.notes ? <Text style={styles.emptySubtitle}>{todayPlan.notes}</Text> : null}
             </View>
-          ) : todayPlan.plannedContactNames.length === 0 ? (
+          ) : contactsOfDetail(todayPlan).length === 0 ? (
             <View style={styles.emptyCard}>
               <MaterialCommunityIcons name="calendar-check-outline" size={36} color={COLORS.textDisabled} />
-              <Text style={styles.emptyTitle}>No doctors planned today</Text>
+              <Text style={styles.emptyTitle}>No doctors or chemists planned today</Text>
               {todayPlan.estimatedCalls > 0 && (
                 <Text style={styles.emptySubtitle}>{todayPlan.estimatedCalls} estimated calls</Text>
               )}
             </View>
           ) : (
-            todayPlan.plannedContactNames.slice(0, 5).map((name, index) => {
-              const doctorId = todayPlan.plannedDoctorIds[index];
-              const visitForDoctor = todayVisits.find(v => v.doctorId === doctorId);
-              const isDone = visitForDoctor && (visitForDoctor.status === 'Checked-Out' || visitForDoctor.status === 'Completed');
-              const isActive = visitForDoctor?.status === 'Checked-In';
-              const initials = name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+            contactsOfDetail(todayPlan)
+              .slice(0, showAllPlanContacts ? undefined : PLAN_CONTACTS_PREVIEW)
+              .map(contact => {
+              // Match today's visit to the planned doctor, chemist or stockist
+              const visitForContact = todayVisits.find(v =>
+                contact.kind === 'chemist' ? v.chemistId === contact.id
+                  : contact.kind === 'stockist' ? v.stockistId === contact.id
+                    : v.doctorId === contact.id);
+              const isDone = visitForContact && (visitForContact.status === 'Checked-Out' || visitForContact.status === 'Completed');
+              const isActive = visitForContact?.status === 'Checked-In';
+              const name = contact.kind === 'doctor' ? contactLabel(contact) : contact.name;
+              const initials = contact.name.replace(/^dr\.?\s+/i, '').split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+              const kindLabel = contact.kind === 'chemist' ? 'Chemist' : contact.kind === 'stockist' ? 'Stockist' : 'Doctor';
+
+              // Already visited / in progress → open that visit; otherwise log one with the party pre-filled
+              const openContact = () => {
+                if (visitForContact) {
+                  navigation.navigate('Visits' as any, {
+                    screen: 'VisitDetail',
+                    params: { visitId: visitForContact.id },
+                    initial: false,
+                  } as any);
+                  return;
+                }
+                navigation.navigate('Visits' as any, {
+                  screen: 'LogVisit',
+                  params: {
+                    doctorId: contact.kind === 'doctor' ? contact.id : undefined,
+                    chemistId: contact.kind === 'chemist' ? contact.id : undefined,
+                    stockistId: contact.kind === 'stockist' ? contact.id : undefined,
+                    fromPlan: true,
+                    returnTo: 'Dashboard',
+                  },
+                  initial: false,
+                } as any);
+              };
 
               return (
-                <View key={doctorId || index} style={styles.doctorCard}>
+                <TouchableOpacity key={contact.id} style={styles.doctorCard} onPress={openContact} activeOpacity={0.7}>
                   {isDone ? (
                     <View style={styles.docAvatarDone}>
                       <MaterialCommunityIcons name="check" size={20} color="#047857" />
@@ -461,7 +549,7 @@ const DashboardScreen: React.FC = () => {
                   )}
                   <View style={styles.docInfo}>
                     <Text style={styles.docName}>{name}</Text>
-                    <Text style={styles.docSpec}>Doctor</Text>
+                    <Text style={styles.docSpec}>{kindLabel}</Text>
                   </View>
                   {isDone ? (
                     <View style={[styles.docBadge, styles.badgeDone]}>
@@ -472,13 +560,34 @@ const DashboardScreen: React.FC = () => {
                       <Text style={styles.badgeActiveText}>In Progress</Text>
                     </View>
                   ) : (
-                    <View style={[styles.docBadge, styles.badgePending]}>
-                      <Text style={styles.badgePendingText}>Pending</Text>
+                    <View style={[styles.docBadge, styles.badgePending, styles.badgeLogVisit]}>
+                      <Text style={styles.badgePendingText}>Log Visit</Text>
+                      <MaterialCommunityIcons name="chevron-right" size={14} color={styles.badgePendingText.color} />
                     </View>
                   )}
-                </View>
+                </TouchableOpacity>
               );
             })
+          )}
+
+          {/* Expand / collapse when the plan has more contacts than the preview shows */}
+          {todayPlan?.activityType === 'FIELD_WORK' && contactsOfDetail(todayPlan).length > PLAN_CONTACTS_PREVIEW && (
+            <TouchableOpacity
+              style={styles.moreContactsRow}
+              onPress={() => setShowAllPlanContacts(prev => !prev)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.moreContactsText}>
+                {showAllPlanContacts
+                  ? 'Show less'
+                  : `+${contactsOfDetail(todayPlan).length - PLAN_CONTACTS_PREVIEW} more`}
+              </Text>
+              <MaterialCommunityIcons
+                name={showAllPlanContacts ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={COLORS.primary}
+              />
+            </TouchableOpacity>
           )}
 
           {/* Profile row */}
@@ -674,6 +783,10 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     fontWeight: '400',
   },
+  metricCaption: {
+    fontSize: SIZES.fontXS,
+    color: COLORS.textDisabled,
+  },
   progressBar: {
     width: '100%',
     height: 6,
@@ -704,12 +817,15 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     fontWeight: '600',
   },
+  // 6 actions → two rows of three
   actionsGrid: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    rowGap: 16,
     marginBottom: SIZES.paddingMD,
   },
   actionItem: {
+    width: '33.33%',
     alignItems: 'center',
     gap: 8,
   },
@@ -752,7 +868,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontWeight: '600',
     textAlign: 'center',
-    maxWidth: 60,
+    maxWidth: 90,
   },
 
   /* Today's Call Plan Cards */
@@ -846,6 +962,24 @@ const styles = StyleSheet.create({
   },
   badgePending: {
     backgroundColor: COLORS.warningLight,
+  },
+  badgeLogVisit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  moreContactsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: SIZES.paddingSM,
+    marginBottom: SIZES.paddingSM,
+  },
+  moreContactsText: {
+    fontSize: SIZES.fontSM,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   badgeDoneText: {
     fontSize: SIZES.fontXS,

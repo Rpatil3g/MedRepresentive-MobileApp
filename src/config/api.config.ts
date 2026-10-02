@@ -58,6 +58,7 @@ export const API_CONFIG = {
     // Profile
     MEDICAL_REPS: '/medicalreps',
     MEDICAL_REPS_BY_USER: '/medicalreps/by-user',
+    MEDICAL_REPS_REJECTED_COUNTS: '/medicalreps/me/rejected-counts',
     
     // Attendance
     ATTENDANCE: '/attendance',
@@ -88,6 +89,17 @@ export const API_CONFIG = {
     // Expenses
     EXPENSES: '/expenses',
     EXPENSES_MY_EXPENSES: '/expenses/my-expenses',
+    EXPENSES_BATCH: '/expenses/batch',
+
+    // Orders
+    ORDERS: '/orders',
+    ORDERS_MY: '/orders/my',
+    ORDERS_SUMMARY: '/orders/summary',
+    ORDERS_CANCEL: '/orders/{id}/cancel',
+
+    // Targets
+    TARGETS_MY: '/targets/my',
+    TARGETS_MY_HISTORY: '/targets/my/history',
 
     // Reports
     REPORTS_MR_DASHBOARD: '/reports/dashboards/mr',

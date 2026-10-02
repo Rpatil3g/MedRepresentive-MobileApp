@@ -17,24 +17,21 @@ export const changePasswordSchema = Yup.object().shape({
     .required('Please confirm your password'),
 });
 
+// Doctors often won't share a personal number, so mobile is optional — but must be valid when given
 export const doctorSchema = Yup.object().shape({
   doctorName: Yup.string().required('Doctor name is required'),
   specialty: Yup.string().required('Specialty is required'),
-  mobileNumber: Yup.string()
-    .matches(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number')
-    .required('Mobile number is required'),
-  email: Yup.string().email('Please enter a valid email'),
+  mobileNumber: Yup.string().matches(/^([0-9]{10})?$/, 'Please enter a valid 10-digit mobile number'),
   clinicName: Yup.string(),
   address: Yup.string(),
 });
 
+// Shops always have a phone (also used for the duplicate check); the owner's name is often unknown at first
 export const chemistSchema = Yup.object().shape({
   pharmacyName: Yup.string().required('Pharmacy / shop name is required'),
-  chemistName: Yup.string().required('Owner / pharmacist name is required'),
+  chemistName: Yup.string(),
   mobileNumber: Yup.string()
     .matches(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number')
     .required('Mobile number is required'),
-  alternateMobile: Yup.string().matches(/^([0-9]{10})?$/, 'Please enter a valid 10-digit mobile number'),
-  email: Yup.string().email('Please enter a valid email'),
 });
 

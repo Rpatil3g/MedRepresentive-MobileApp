@@ -17,7 +17,12 @@ const faqs = [
   {
     question: 'How do I punch in for attendance?',
     answer:
-      'Go to the Home screen and tap the Attendance quick action. Press "Punch In" — your GPS location will be recorded automatically.',
+      'On the Home screen, tap "Punch In" on the attendance card at the top — your GPS location is recorded automatically. You need to be punched in to log visits.',
+  },
+  {
+    question: 'Where can I see my attendance history?',
+    answer:
+      'Open Profile → My Attendance. It shows each month as a calendar (present, half day, absent, leave, holidays) — tap any day to see your punch-in and punch-out times.',
   },
   {
     question: 'How do I log a doctor visit?',
@@ -37,7 +42,7 @@ const faqs = [
   {
     question: 'My location is not updating — what should I do?',
     answer:
-      'Make sure location permission is set to "Always Allow" in your device settings for GoodPharma MR, and that you are punched in.',
+      'Make sure location permission is set to "Always Allow" in your device settings for EterniRo Field Force, and that you are punched in.',
   },
 ];
 
@@ -45,7 +50,7 @@ const HelpSupportScreen: React.FC = () => {
   const [expanded, setExpanded] = React.useState<number | null>(null);
 
   const openEmail = () => {
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=GoodPharma MR Support`);
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=EterniRo Field Force Support`);
   };
 
   return (

@@ -1,5 +1,5 @@
 export const APP_CONFIG = {
-  APP_NAME: 'GoodPharma MR',
+  APP_NAME: 'EterniRo Field Force',
   VERSION: '1.0.0',
   
   // Location Tracking

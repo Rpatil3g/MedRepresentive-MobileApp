@@ -12,7 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useForm, Controller, SubmitHandler } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import Geolocation from 'react-native-geolocation-service';
-import { Button, Input, Loading, HqRoutePicker } from '../../components/common';
+import { Button, Input, Loading, HqRoutePicker, CollapsibleSection } from '../../components/common';
 import { HqRouteValue } from '../../components/common/HqRoutePicker';
 import { chemistApi } from '../../services/api';
 import { CreateChemistRequest } from '../../types/chemist.types';
@@ -22,16 +22,11 @@ import { requestLocationPermission, showAlert } from '../../utils/helpers';
 
 interface ChemistFormData {
   pharmacyName: string;
-  chemistName: string;
+  chemistName: string | undefined;
   licenseNumber: string | undefined;
   mobileNumber: string;
-  alternateMobile: string | undefined;
-  email: string | undefined;
   address: string | undefined;
   city: string | undefined;
-  state: string | undefined;
-  pincode: string | undefined;
-  monthlyPotential: string | undefined;
   notes: string | undefined;
 }
 
@@ -100,20 +95,13 @@ const AddChemistScreen: React.FC = () => {
     try {
       const chemistData: CreateChemistRequest = {
         pharmacyName: data.pharmacyName,
-        chemistName: data.chemistName,
+        chemistName: data.chemistName?.trim() || undefined,
         licenseNumber: data.licenseNumber,
         mobileNumber: data.mobileNumber,
-        alternateMobile: data.alternateMobile || undefined,
-        email: data.email,
         address: data.address,
         city: data.city,
-        state: data.state,
-        pincode: data.pincode,
         latitude: location?.latitude,
         longitude: location?.longitude,
-        monthlyPotential: data.monthlyPotential
-          ? parseFloat(data.monthlyPotential)
-          : undefined,
         notes: data.notes,
         routeId: hqRoute.routeId,
       };
@@ -199,7 +187,6 @@ const AddChemistScreen: React.FC = () => {
           ) : null}
         </View>
 
-        <Text style={styles.sectionTitle}>Basic Information</Text>
         <Controller
           control={control}
           name="pharmacyName"
@@ -220,39 +207,15 @@ const AddChemistScreen: React.FC = () => {
           name="chemistName"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Owner / Pharmacist Name *"
-              placeholder="Enter owner's name"
+              label="Owner / Pharmacist Name"
+              placeholder="Optional"
               icon="account"
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
-              error={errors.chemistName?.message}
             />
           )}
         />
-        <Controller
-          control={control}
-          name="licenseNumber"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Drug License Number"
-              placeholder="License number"
-              icon="card-account-details"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-
-        <Text style={styles.sectionTitle}>Route / Area</Text>
-        <HqRoutePicker
-          value={hqRoute}
-          onChange={v => { setHqRoute(v); if (v.routeId) { setRouteError(undefined); } }}
-          routeError={routeError}
-        />
-
-        <Text style={styles.sectionTitle}>Contact Information</Text>
         <Controller
           control={control}
           name="mobileNumber"
@@ -270,135 +233,76 @@ const AddChemistScreen: React.FC = () => {
             />
           )}
         />
-        <Controller
-          control={control}
-          name="alternateMobile"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Alternate Mobile"
-              placeholder="10-digit mobile number"
-              icon="phone-plus"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={errors.alternateMobile?.message}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="email"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Email"
-              placeholder="chemist@example.com"
-              icon="email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={errors.email?.message}
-            />
-          )}
+
+        <Text style={styles.sectionTitle}>Route / Area</Text>
+        <HqRoutePicker
+          value={hqRoute}
+          onChange={v => { setHqRoute(v); if (v.routeId) { setRouteError(undefined); } }}
+          routeError={routeError}
         />
 
-        <Text style={styles.sectionTitle}>Address</Text>
-        <Controller
-          control={control}
-          name="address"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Address"
-              placeholder="Shop address"
-              icon="map-marker"
-              multiline
-              numberOfLines={3}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="city"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="City"
-              placeholder="City"
-              icon="city"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="state"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="State"
-              placeholder="State"
-              icon="map"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="pincode"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Pincode"
-              placeholder="6-digit pincode"
-              icon="numeric"
-              keyboardType="numeric"
-              maxLength={6}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-
-        <Text style={styles.sectionTitle}>Additional Information</Text>
-        <Controller
-          control={control}
-          name="monthlyPotential"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Monthly Potential (₹)"
-              placeholder="e.g., 50000"
-              icon="currency-inr"
-              keyboardType="numeric"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="notes"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Notes"
-              placeholder="Any additional notes"
-              icon="note-text"
-              multiline
-              numberOfLines={4}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
+        <CollapsibleSection title="More details (optional)" hint="Drug license no., address, city, notes">
+          <Controller
+            control={control}
+            name="licenseNumber"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Drug License Number"
+                placeholder="Helps your manager verify the shop"
+                icon="card-account-details"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="address"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Address"
+                placeholder="Shop address"
+                icon="map-marker"
+                multiline
+                numberOfLines={3}
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="city"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="City"
+                placeholder="City"
+                icon="city"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="notes"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Notes"
+                placeholder="Any additional notes"
+                icon="note-text"
+                multiline
+                numberOfLines={4}
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+        </CollapsibleSection>
 
         <Button
           title="Add Chemist"
@@ -443,11 +347,11 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontLG,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginTop: SIZES.paddingMD,
+    marginTop: SIZES.paddingSM,
     marginBottom: SIZES.paddingMD,
   },
   submitButton: {
-    marginTop: SIZES.paddingXL,
+    marginTop: SIZES.paddingLG,
     marginBottom: SIZES.paddingXL,
   },
 });

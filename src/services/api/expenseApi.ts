@@ -1,6 +1,6 @@
 import axiosInstance from './axiosInstance';
 import { API_CONFIG } from '../../config/api.config';
-import { Expense, CreateExpenseRequest, UpdateExpenseRequest } from '../../types/expense.types';
+import { Expense, CreateExpenseRequest, CreateExpenseBatchRequest, UpdateExpenseRequest } from '../../types/expense.types';
 
 class ExpenseApi {
   async createExpense(data: CreateExpenseRequest): Promise<Expense> {
@@ -9,6 +9,15 @@ class ExpenseApi {
       data
     );
     return response.data?.data ?? response.data;
+  }
+
+  /** All-or-nothing: either every category is saved or none. */
+  async createExpenses(data: CreateExpenseBatchRequest): Promise<Expense[]> {
+    const response = await axiosInstance.post<any>(
+      API_CONFIG.ENDPOINTS.EXPENSES_BATCH,
+      data
+    );
+    return response.data?.data ?? response.data ?? [];
   }
 
   async getExpenseById(id: string): Promise<Expense> {
@@ -26,7 +35,16 @@ class ExpenseApi {
     return response.data?.data ?? response.data;
   }
 
-  async getMyExpenses(params?: { date?: string }): Promise<Expense[]> {
+  /**
+   * The MR's own expenses. Dates are 'yyyy-MM-dd' expense dates: `date` for one day, or
+   * `fromDate`/`toDate` (inclusive). `status` is a comma-separated list, e.g. 'Rejected,Pending'.
+   */
+  async getMyExpenses(params?: {
+    date?: string;
+    fromDate?: string;
+    toDate?: string;
+    status?: string;
+  }): Promise<Expense[]> {
     const response = await axiosInstance.get<any>(
       API_CONFIG.ENDPOINTS.EXPENSES_MY_EXPENSES,
       params ? { params } : undefined

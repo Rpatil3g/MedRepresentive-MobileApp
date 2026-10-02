@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Card } from '../../components/common';
-import tourPlanApi from '../../services/api/tourPlanApi';
 import { TourPlanResponse, PlanStatus } from '../../types/tourPlan.types';
 import { COLORS, SIZES } from '../../constants';
 import { formatDate } from '../../utils/dateUtils';
@@ -52,17 +51,16 @@ const MTPSummaryScreen: React.FC = () => {
     try {
       setLoading(true);
       const year = new Date().getFullYear();
-      const res = await tourPlanApi.getById; // unused — use list endpoint
-      const listRes = await tourPlanApi.getMyPlanByMonth; // unused below
 
-      // Fetch this year's plans using the list endpoint
+      // This year's plans from the list endpoint — up to 12 monthly or ~53 weekly plans
       const axiosRes = await import('../../services/api/axiosInstance').then(m => m.default);
       const { API_CONFIG } = await import('../../config/api.config');
       const response = await axiosRes.get(API_CONFIG.ENDPOINTS.TOUR_PLANS, {
-        params: { year, pageSize: 12 },
+        params: { year, pageSize: 60 },
       });
       const items: TourPlanResponse[] = response.data?.items ?? response.data ?? [];
-      setPlans(items.sort((a, b) => b.month - a.month));
+      // Newest period first
+      setPlans(items.sort((a, b) => (b.periodStart ?? '').localeCompare(a.periodStart ?? '') || b.month - a.month));
     } catch (error) {
       console.error('Failed to load plans:', error);
     } finally {
@@ -78,7 +76,7 @@ const MTPSummaryScreen: React.FC = () => {
       <Card style={styles.planCard}>
         <View style={styles.planHeader}>
           <View>
-            <Text style={styles.planMonth}>{MONTH_NAMES[item.month - 1]} {item.year}</Text>
+            <Text style={styles.planMonth}>{item.periodLabel || `${MONTH_NAMES[item.month - 1]} ${item.year}`}</Text>
             <Text style={styles.planSub}>{item.plannedDays}/{item.totalWorkingDays} days planned</Text>
           </View>
           <View style={[styles.statusChip, { backgroundColor: `${color}22`, borderColor: color }]}>

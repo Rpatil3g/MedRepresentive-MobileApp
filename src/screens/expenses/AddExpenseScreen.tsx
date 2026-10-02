@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import DateTimePicker, { DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import {
@@ -49,9 +49,12 @@ const AddExpenseScreen: React.FC = () => {
   const navigation = useNavigation<AddExpenseNavProp>();
   const route = useRoute<AddExpenseRouteProp>();
   const defaultDate = route.params?.date ?? getTodayDate();
+  const returnTo = route.params?.returnTo;
 
-  const [category, setCategory] = useState<ExpenseCategory>('Travel');
-  const [amount, setAmount] = useState('');
+  // Tick every type spent on that day; each gets its own amount and is saved as its own expense
+  const [selected, setSelected] = useState<ExpenseCategory[]>([]);
+  const [amounts, setAmounts] = useState<Partial<Record<ExpenseCategory, string>>>({});
+  const amountRefs = useRef<Partial<Record<ExpenseCategory, TextInput | null>>>({});
   const [description, setDescription] = useState('');
 
   const parseInitialDate = (d: string): Date => {
@@ -77,6 +80,21 @@ const AddExpenseScreen: React.FC = () => {
   const [receiptUrl, setReceiptUrl] = useState<string>('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const toggleCategory = (cat: ExpenseCategory) => {
+    if (selected.includes(cat)) {
+      setSelected(prev => prev.filter(c => c !== cat));
+      return;
+    }
+    // Keep the list order (Travel, Food, Other) regardless of tap order
+    setSelected(prev => CATEGORIES.map(c => c.value).filter(v => v === cat || prev.includes(v)));
+    setTimeout(() => amountRefs.current[cat]?.focus(), 50);
+  };
+
+  const total = useMemo(
+    () => selected.reduce((sum, c) => sum + (parseFloat(amounts[c] ?? '') || 0), 0),
+    [selected, amounts],
+  );
 
   const handlePickImage = async (source: 'camera' | 'gallery') => {
     const result = source === 'camera'
@@ -110,10 +128,25 @@ const AddExpenseScreen: React.FC = () => {
     setReceiptUrl('');
   };
 
+  // Opened from the DCR screen: go back there, leaving the Expenses stack on its list for next time
+  const leave = () => {
+    if (returnTo === 'DCR') {
+      navigation.dispatch(CommonActions.reset({ index: 0, routes: [{ name: 'ExpenseList' }] }));
+      navigation.getParent()?.navigate('DCR' as never);
+    } else {
+      navigation.goBack();
+    }
+  };
+
   const handleSave = async () => {
-    const parsedAmount = parseFloat(amount);
-    if (!amount || isNaN(parsedAmount) || parsedAmount <= 0) {
-      showAlert('Required', 'Please enter a valid amount.');
+    if (selected.length === 0) {
+      showAlert('Required', 'Tick at least one expense type.');
+      return;
+    }
+    const missing = selected.find(c => !(parseFloat(amounts[c] ?? '') > 0));
+    if (missing) {
+      showAlert('Required', `Please enter a valid amount for ${missing}.`);
+      amountRefs.current[missing]?.focus();
       return;
     }
     if (uploading) {
@@ -123,14 +156,20 @@ const AddExpenseScreen: React.FC = () => {
 
     setSaving(true);
     try {
-      await expenseApi.createExpense({
+      // One request, all-or-nothing: one expense per ticked type
+      await expenseApi.createExpenses({
         expenseDate,
-        category,
-        amount: parsedAmount,
+        items: selected.map(c => ({ category: c, amount: parseFloat(amounts[c]!) })),
         description: description.trim() || undefined,
         receiptUrl: receiptUrl || undefined,
       });
-      showAlert('Success', 'Expense added successfully.', () => navigation.goBack());
+      showAlert(
+        'Saved',
+        selected.length === 1
+          ? 'Expense added successfully.'
+          : `${selected.length} expenses added • ₹ ${total.toLocaleString('en-IN')}`,
+        leave,
+      );
     } catch (error: any) {
       const msg = error?.response?.data?.message || 'Failed to save expense.';
       showAlert('Error', msg);
@@ -144,7 +183,7 @@ const AddExpenseScreen: React.FC = () => {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
         {/* Date */}
         <TouchableOpacity style={styles.card} onPress={() => setShowDatePicker(true)} activeOpacity={0.7}>
@@ -165,57 +204,52 @@ const AddExpenseScreen: React.FC = () => {
           />
         )}
 
-        {/* Category */}
+        {/* Expense types — tick all that apply, amount per type */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Category</Text>
-          <View style={styles.categoryRow}>
-            {CATEGORIES.map(cat => {
-              const isActive = category === cat.value;
-              return (
-                <TouchableOpacity
-                  key={cat.value}
-                  style={[
-                    styles.catChip,
-                    { borderColor: isActive ? cat.color : COLORS.border },
-                    isActive && { backgroundColor: cat.bg },
-                  ]}
-                  onPress={() => setCategory(cat.value)}
-                  activeOpacity={0.75}
-                >
+          <Text style={styles.cardTitle}>Expenses for the day</Text>
+          {CATEGORIES.map((cat, idx) => {
+            const isOn = selected.includes(cat.value);
+            return (
+              <View key={cat.value} style={[styles.catRow, idx < CATEGORIES.length - 1 && styles.catRowBorder]}>
+                <TouchableOpacity style={styles.catToggle} onPress={() => toggleCategory(cat.value)} activeOpacity={0.7}>
                   <MaterialCommunityIcons
-                    name={cat.icon}
-                    size={18}
-                    color={isActive ? cat.color : COLORS.textSecondary}
+                    name={isOn ? 'checkbox-marked' : 'checkbox-blank-outline'}
+                    size={24}
+                    color={isOn ? COLORS.primary : COLORS.textSecondary}
                   />
-                  <Text style={[styles.catChipText, isActive && { color: cat.color }]}>
-                    {cat.label}
-                  </Text>
+                  <View style={[styles.catIcon, { backgroundColor: cat.bg }]}>
+                    <MaterialCommunityIcons name={cat.icon} size={18} color={cat.color} />
+                  </View>
+                  <Text style={[styles.catLabel, isOn && styles.catLabelOn]}>{cat.label}</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </View>
+                {isOn ? (
+                  <View style={styles.catAmount}>
+                    <Text style={styles.catCurrency}>₹</Text>
+                    <TextInput
+                      ref={el => { amountRefs.current[cat.value] = el; }}
+                      style={styles.catAmountInput}
+                      value={amounts[cat.value] ?? ''}
+                      onChangeText={v => setAmounts(prev => ({ ...prev, [cat.value]: v.replace(/[^0-9.]/g, '') }))}
+                      keyboardType="decimal-pad"
+                      placeholder="0"
+                      placeholderTextColor={COLORS.textDisabled}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+          {selected.length > 1 && (
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>₹ {total.toLocaleString('en-IN')}</Text>
+            </View>
+          )}
         </View>
 
-        {/* Amount */}
+        {/* Note */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Amount</Text>
-          <View style={styles.amountRow}>
-            <Text style={styles.currencySymbol}>₹</Text>
-            <TextInput
-              style={styles.amountInput}
-              value={amount}
-              onChangeText={setAmount}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
-              placeholderTextColor={COLORS.textDisabled}
-              autoFocus
-            />
-          </View>
-        </View>
-
-        {/* Description */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Description (optional)</Text>
+          <Text style={styles.cardTitle}>Note (optional)</Text>
           <TextInput
             style={styles.descInput}
             value={description}
@@ -230,7 +264,7 @@ const AddExpenseScreen: React.FC = () => {
 
         {/* Receipt */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Receipt</Text>
+          <Text style={styles.cardTitle}>Receipt (optional)</Text>
 
           {receiptUri ? (
             <View style={styles.receiptPreview}>
@@ -279,7 +313,11 @@ const AddExpenseScreen: React.FC = () => {
           onPress={handleSave}
           disabled={saving || uploading}
         >
-          <Text style={styles.saveBtnText}>Save Expense</Text>
+          <Text style={styles.saveBtnText}>
+            {selected.length > 1
+              ? `Save ${selected.length} Expenses • ₹ ${total.toLocaleString('en-IN')}`
+              : 'Save Expense'}
+          </Text>
         </TouchableOpacity>
 
       </ScrollView>
@@ -326,48 +364,79 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textPrimary,
   },
-  categoryRow: {
+  catRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    minHeight: 52,
+    paddingVertical: 6,
   },
-  catChip: {
+  catRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  catToggle: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: SIZES.paddingSM + 2,
-    borderRadius: SIZES.radiusMD,
-    borderWidth: 1.5,
-    borderColor: COLORS.border,
-    backgroundColor: COLORS.backgroundGray,
+    gap: 10,
+    paddingVertical: 4,
   },
-  catChipText: {
-    fontSize: SIZES.fontSM,
-    fontWeight: '600',
+  catIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  catLabel: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '500',
     color: COLORS.textSecondary,
   },
-  amountRow: {
+  catLabelOn: {
+    color: COLORS.textPrimary,
+    fontWeight: '600',
+  },
+  catAmount: {
     flexDirection: 'row',
     alignItems: 'center',
+    width: 130,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    borderColor: COLORS.primary,
     borderRadius: SIZES.radiusMD,
-    paddingHorizontal: SIZES.paddingMD,
-    backgroundColor: COLORS.backgroundGray,
+    paddingHorizontal: SIZES.paddingSM,
+    backgroundColor: COLORS.background,
   },
-  currencySymbol: {
-    fontSize: SIZES.fontXL,
+  catCurrency: {
+    fontSize: SIZES.fontMD,
     fontWeight: '700',
     color: COLORS.textSecondary,
-    marginRight: 6,
+    marginRight: 4,
   },
-  amountInput: {
+  catAmountInput: {
     flex: 1,
-    fontSize: SIZES.font2XL,
+    fontSize: SIZES.fontLG,
     fontWeight: '700',
     color: COLORS.textPrimary,
-    paddingVertical: SIZES.paddingSM + 4,
+    paddingVertical: SIZES.paddingSM,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    marginTop: SIZES.paddingSM,
+    paddingTop: SIZES.paddingSM,
+  },
+  totalLabel: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  totalValue: {
+    fontSize: SIZES.fontLG,
+    fontWeight: '800',
+    color: COLORS.primary,
   },
   descInput: {
     borderWidth: 1,

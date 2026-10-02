@@ -58,4 +58,11 @@ export const ROUTES = {
   EXPENSE_LIST: 'ExpenseList',
   ADD_EXPENSE: 'AddExpense',
   EDIT_EXPENSE: 'EditExpense',
+
+  // Order Stack
+  ORDERS: 'Orders',
+  ORDER_LIST: 'OrderList',
+  BOOK_ORDER: 'BookOrder',
+  ORDER_DETAIL: 'OrderDetail',
+  MY_TARGETS: 'MyTargets',
 } as const;

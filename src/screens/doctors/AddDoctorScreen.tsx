@@ -12,27 +12,29 @@ import { useNavigation } from '@react-navigation/native';
 import { useForm, Controller, SubmitHandler } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import Geolocation from 'react-native-geolocation-service';
-import { Button, Input, Loading, HqRoutePicker } from '../../components/common';
+import { Button, Input, Loading, HqRoutePicker, SelectField, CollapsibleSection } from '../../components/common';
 import { HqRouteValue } from '../../components/common/HqRoutePicker';
-import { doctorApi } from '../../services/api';
+import { doctorApi, lookupApi } from '../../services/api';
 import { CreateDoctorRequest } from '../../types/doctor.types';
 import { COLORS, SIZES } from '../../constants';
 import { doctorSchema } from '../../utils/validation';
 import { DOCTOR_TITLE_REGEX, requestLocationPermission, showAlert } from '../../utils/helpers';
 
+// Shown until the admin-managed "Specialty" lookup loads (Master.LookupValues is the source of truth)
+const FALLBACK_SPECIALTIES = [
+  'General Medicine', 'Cardiology', 'Diabetology', 'Endocrinology', 'Gynecology', 'Pediatrics',
+  'Orthopedics', 'Dermatology', 'ENT', 'Ophthalmology', 'Neurology', 'Psychiatry',
+  'Gastroenterology', 'Pulmonology', 'Nephrology', 'Urology', 'Oncology', 'General Surgery',
+  'Dentistry', 'Other',
+];
+
 interface DoctorFormData {
   doctorName: string;
   specialty: string;
-  qualification: string | undefined;
-  registrationNumber: string | undefined;
-  mobileNumber: string;
-  email: string | undefined;
+  mobileNumber: string | undefined;
   clinicName: string | undefined;
   address: string | undefined;
   city: string | undefined;
-  state: string | undefined;
-  pincode: string | undefined;
-  averagePatientPerDay: string | undefined;
   bestTimeToVisit: string | undefined;
   notes: string | undefined;
 }
@@ -45,6 +47,7 @@ const AddDoctorScreen: React.FC = () => {
   const [gettingLocation, setGettingLocation] = useState(false);
   const [hqRoute, setHqRoute] = useState<HqRouteValue>({});
   const [routeError, setRouteError] = useState<string | undefined>();
+  const [specialties, setSpecialties] = useState<string[]>(FALLBACK_SPECIALTIES);
 
   const {
     control,
@@ -56,6 +59,10 @@ const AddDoctorScreen: React.FC = () => {
 
   useEffect(() => {
     getCurrentLocation();
+    lookupApi
+      .getByCategory('Specialty')
+      .then(values => { if (values.length) setSpecialties(values); })
+      .catch(() => undefined);
   }, []);
 
   const getCurrentLocation = async () => {
@@ -103,20 +110,12 @@ const AddDoctorScreen: React.FC = () => {
       const doctorData: CreateDoctorRequest = {
         doctorName: data.doctorName.replace(DOCTOR_TITLE_REGEX, '').trim(),
         specialty: data.specialty,
-        qualification: data.qualification,
-        registrationNumber: data.registrationNumber,
-        mobileNumber: data.mobileNumber,
-        email: data.email,
+        mobileNumber: data.mobileNumber || undefined,
         clinicName: data.clinicName,
         address: data.address,
         city: data.city,
-        state: data.state,
-        pincode: data.pincode,
         latitude: location?.latitude,
         longitude: location?.longitude,
-        averagePatientPerDay: data.averagePatientPerDay
-          ? parseInt(data.averagePatientPerDay, 10)
-          : undefined,
         bestTimeToVisit: data.bestTimeToVisit,
         notes: data.notes,
         routeId: hqRoute.routeId,
@@ -154,7 +153,8 @@ const AddDoctorScreen: React.FC = () => {
 
       setLoading(true);
 
-      const isDuplicate = await checkDuplicate(data.mobileNumber);
+      // Mobile is optional for doctors — only check duplicates when one was given
+      const isDuplicate = data.mobileNumber ? await checkDuplicate(data.mobileNumber) : false;
       if (isDuplicate) {
         Alert.alert(
           'Duplicate Doctor',
@@ -203,7 +203,6 @@ const AddDoctorScreen: React.FC = () => {
           ) : null}
         </View>
 
-        <Text style={styles.sectionTitle}>Basic Information</Text>
         <Controller
           control={control}
           name="doctorName"
@@ -224,26 +223,26 @@ const AddDoctorScreen: React.FC = () => {
         <Controller
           control={control}
           name="specialty"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
+          render={({ field: { onChange, value } }) => (
+            <SelectField
               label="Specialty *"
-              placeholder="e.g., Cardiologist, Pediatrician"
+              placeholder="Select specialty"
               icon="stethoscope"
+              options={specialties}
               value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
+              onSelect={onChange}
               error={errors.specialty?.message}
             />
           )}
         />
         <Controller
           control={control}
-          name="qualification"
+          name="clinicName"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Qualification"
-              placeholder="e.g., MBBS, MD"
-              icon="school"
+              label="Clinic / Hospital Name"
+              placeholder="Helps you find the doctor later"
+              icon="hospital-building"
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
@@ -252,15 +251,18 @@ const AddDoctorScreen: React.FC = () => {
         />
         <Controller
           control={control}
-          name="registrationNumber"
+          name="mobileNumber"
           render={({ field: { onChange, onBlur, value } }) => (
             <Input
-              label="Registration Number"
-              placeholder="Medical registration number"
-              icon="card-account-details"
+              label="Mobile Number"
+              placeholder="10-digit number (optional)"
+              icon="phone"
+              keyboardType="phone-pad"
+              maxLength={10}
               value={value}
               onChangeText={onChange}
               onBlur={onBlur}
+              error={errors.mobileNumber?.message}
             />
           )}
         />
@@ -272,164 +274,68 @@ const AddDoctorScreen: React.FC = () => {
           routeError={routeError}
         />
 
-        <Text style={styles.sectionTitle}>Contact Information</Text>
-        <Controller
-          control={control}
-          name="mobileNumber"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Mobile Number *"
-              placeholder="10-digit mobile number"
-              icon="phone"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={errors.mobileNumber?.message}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="email"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Email"
-              placeholder="doctor@example.com"
-              icon="email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-              error={errors.email?.message}
-            />
-          )}
-        />
-
-        <Text style={styles.sectionTitle}>Clinic Information</Text>
-        <Controller
-          control={control}
-          name="clinicName"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Clinic Name"
-              placeholder="Enter clinic/hospital name"
-              icon="hospital-building"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="address"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Address"
-              placeholder="Clinic address"
-              icon="map-marker"
-              multiline
-              numberOfLines={3}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="city"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="City"
-              placeholder="City"
-              icon="city"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="state"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="State"
-              placeholder="State"
-              icon="map"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="pincode"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Pincode"
-              placeholder="6-digit pincode"
-              icon="numeric"
-              keyboardType="numeric"
-              maxLength={6}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-
-        <Text style={styles.sectionTitle}>Additional Information</Text>
-        <Controller
-          control={control}
-          name="averagePatientPerDay"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Average Patients Per Day"
-              placeholder="e.g., 50"
-              icon="account-group"
-              keyboardType="numeric"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="bestTimeToVisit"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Best Time to Visit"
-              placeholder="e.g., 10:00 AM - 12:00 PM"
-              icon="clock"
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="notes"
-          render={({ field: { onChange, onBlur, value } }) => (
-            <Input
-              label="Notes"
-              placeholder="Any additional notes"
-              icon="note-text"
-              multiline
-              numberOfLines={4}
-              value={value}
-              onChangeText={onChange}
-              onBlur={onBlur}
-            />
-          )}
-        />
+        <CollapsibleSection title="More details (optional)" hint="Address, city, best time to visit, notes">
+          <Controller
+            control={control}
+            name="address"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Address"
+                placeholder="Clinic address"
+                icon="map-marker"
+                multiline
+                numberOfLines={3}
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="city"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="City"
+                placeholder="City"
+                icon="city"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="bestTimeToVisit"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Best Time to Visit"
+                placeholder="e.g., 10:00 AM - 12:00 PM"
+                icon="clock"
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+          <Controller
+            control={control}
+            name="notes"
+            render={({ field: { onChange, onBlur, value } }) => (
+              <Input
+                label="Notes"
+                placeholder="Any additional notes"
+                icon="note-text"
+                multiline
+                numberOfLines={4}
+                value={value}
+                onChangeText={onChange}
+                onBlur={onBlur}
+              />
+            )}
+          />
+        </CollapsibleSection>
 
         <Button
           title="Add Doctor"
@@ -474,14 +380,13 @@ const styles = StyleSheet.create({
     fontSize: SIZES.fontLG,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginTop: SIZES.paddingMD,
+    marginTop: SIZES.paddingSM,
     marginBottom: SIZES.paddingMD,
   },
   submitButton: {
-    marginTop: SIZES.paddingXL,
+    marginTop: SIZES.paddingLG,
     marginBottom: SIZES.paddingXL,
   },
 });
 
 export default AddDoctorScreen;
-

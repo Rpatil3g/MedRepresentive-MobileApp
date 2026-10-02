@@ -69,6 +69,11 @@ const MoreScreen: React.FC = () => {
       <Text style={styles.sectionTitle}>Account</Text>
       <Card style={styles.menuCard}>
         <MenuItem
+          icon="calendar-account"
+          title="My Attendance"
+          onPress={() => navigation.navigate('MyAttendance')}
+        />
+        <MenuItem
           icon="lock"
           title="Change Password"
           onPress={() => navigation.navigate('ChangePassword')}

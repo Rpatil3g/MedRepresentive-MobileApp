@@ -29,6 +29,15 @@ class StockistApi {
     return response.data?.items ?? [];
   }
 
+  /** Active stockists — in the given HQ when passed, otherwise the first page A–Z */
+  async listStockists(headquartersId?: string, pageSize = 100): Promise<Stockist[]> {
+    const response = await axiosInstance.get<StockistListResponse>(
+      API_CONFIG.ENDPOINTS.STOCKISTS,
+      { params: { headquartersId, isActive: true, pageSize } },
+    );
+    return response.data?.items ?? [];
+  }
+
   async getStockistById(id: string): Promise<Stockist> {
     const response = await axiosInstance.get<Stockist>(
       `${API_CONFIG.ENDPOINTS.STOCKISTS}/${id}`,

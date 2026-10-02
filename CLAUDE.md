@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**GoodPharma MR** — a React Native mobile app for Medical Representatives (field sales agents in pharma). It connects to a .NET backend (`GoodPharma.API`) over REST. Key MR workflows: attendance punch-in/out, doctor visits (check-in/check-out), Daily Call Reports (DCR), Monthly Tour Plans (MTP), product catalog, tasks, and live GPS tracking while on duty.
+**EterniRo Field Force** (formerly "GoodPharma MR") — a React Native mobile app for Medical Representatives (field sales agents in pharma). It connects to a .NET backend (`GoodPharma.API`) over REST. Key MR workflows: attendance punch-in/out, doctor visits (check-in/check-out), Daily Call Reports (DCR), Monthly Tour Plans (MTP), product catalog, tasks, and live GPS tracking while on duty.
 
 ## Commands
 
@@ -38,7 +38,7 @@ Copy `.env.development` and adjust for your environment. Variables are consumed 
 API_BASE_URL=http://<your-machine-ip>:<port>
 API_PREFIX=/api/v1
 API_TIMEOUT=30000
-APP_NAME=GoodPharma MR
+APP_NAME=EterniRo Field Force
 ```
 
 On Android the axios instance automatically replaces `localhost` with `10.0.2.2` for emulator compatibility ([src/services/api/axiosInstance.ts](src/services/api/axiosInstance.ts)).
@@ -68,6 +68,8 @@ Use `useAppSelector` / `useAppDispatch` from [src/store/hooks.ts](src/store/hook
 All HTTP calls go through the singleton `axiosInstance` ([src/services/api/axiosInstance.ts](src/services/api/axiosInstance.ts)), which:
 - Attaches `Authorization: Bearer <token>` on every request
 - Handles 401 by attempting a token refresh (via `/auth/refresh-token`), retrying the original request once, then dispatching `logout()` on failure
+
+The backend is multi-tenant: every request is scoped to the signed-in user's company by the `tenant_id` claim in the token, so the app never sends or filters a tenant itself. A suspended company gets 403 on every request and can't sign in or refresh.
 
 Per-domain API modules live in [src/services/api/](src/services/api/) and are re-exported from [src/services/api/index.ts](src/services/api/index.ts). All endpoint paths are centralised in [src/config/api.config.ts](src/config/api.config.ts).
 

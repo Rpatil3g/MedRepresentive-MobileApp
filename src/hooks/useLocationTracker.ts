@@ -13,8 +13,12 @@ const NOTIF_ID    = 1001;
 
 // ─── Shared location sender ───────────────────────────────────────────────────
 
-const collectAndSend = async (): Promise<void> => {
-  await new Promise<void>((resolve) => {
+/**
+ * Sends one ping. Resolves false only when the server says the MR's day is closed (punched out
+ * elsewhere, or auto-closed at night); errors and missing fixes count as "still active".
+ */
+const collectAndSend = async (): Promise<boolean> => {
+  return new Promise<boolean>((resolve) => {
     Geolocation.getCurrentPosition(
       async (pos) => {
         const { latitude, longitude, accuracy, speed, altitude } = pos.coords;
@@ -27,7 +31,7 @@ const collectAndSend = async (): Promise<void> => {
         }
 
         try {
-          await liveTrackingApi.updateLocation({
+          const active = await liveTrackingApi.updateLocation({
             latitude,
             longitude,
             timestamp: new Date().toISOString(),
@@ -37,13 +41,15 @@ const collectAndSend = async (): Promise<void> => {
             altitude:  altitude  ?? undefined,
             batteryLevel,
           });
+          resolve(active);
+          return;
         } catch {
           // Best-effort — never surface tracking errors to the user
         }
 
-        resolve();
+        resolve(true);
       },
-      () => resolve(), // Location unavailable — skip this ping silently
+      () => resolve(true), // Location unavailable — skip this ping silently
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
   });
@@ -51,19 +57,23 @@ const collectAndSend = async (): Promise<void> => {
 
 // ─── Android helpers (foreground service) ────────────────────────────────────
 
-const startForegroundService = async (): Promise<void> => {
+const ON_DUTY_TEXT  = 'Location tracking is active';
+const REMINDER_TEXT = "Still on duty? Don't forget to punch out when you finish.";
+
+const startForegroundService = async (text: string = ON_DUTY_TEXT): Promise<void> => {
   await VIForegroundService.getInstance().createNotificationChannel({
     id:               CHANNEL_ID,
     name:             'Location Tracking',
-    description:      'GoodPharma tracks your location while you are on duty',
+    description:      'EterniRo Field Force tracks your location while you are on duty',
     enableVibration:  false,
   });
 
+  // Calling this again while running just updates the notification's text
   await VIForegroundService.getInstance().startService({
     channelId: CHANNEL_ID,
     id:        NOTIF_ID,
-    title:     'GoodPharma MR – On Duty',
-    text:      'Location tracking is active',
+    title:     'EterniRo Field Force – On Duty',
+    text,
     icon:      'ic_launcher',
     button:    false,
   });
@@ -91,15 +101,44 @@ const stopForegroundService = async (): Promise<void> => {
  *          per 5 minutes so we don't flood the server.
  *
  * Everything stops automatically when isPunchedIn becomes false or the
- * component unmounts.
+ * component unmounts — or when the server reports the day closed (onDayClosed is
+ * then called so the screen can update). On Android, once punchOutReminderAtUtc
+ * has passed, the on-duty notification turns into a punch-out reminder.
  */
-export const useLocationTracker = (isPunchedIn: boolean): void => {
+export const useLocationTracker = (
+  isPunchedIn: boolean,
+  options: { punchOutReminderAtUtc?: string; onDayClosed?: () => void } = {},
+): void => {
   // Android
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const remindedRef = useRef(false);
 
   // iOS
   const watchIdRef  = useRef<number | null>(null);
   const lastSentRef = useRef<number>(0);
+
+  // Latest options without restarting tracking when they change
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  // One tracking tick: send, stop if the day is over, flip the notification to a reminder when due
+  const tick = async (): Promise<void> => {
+    const active = await collectAndSend();
+    if (!active) {
+      optionsRef.current.onDayClosed?.();
+      return;
+    }
+    const reminderAt = optionsRef.current.punchOutReminderAtUtc;
+    if (
+      Platform.OS === 'android' &&
+      !remindedRef.current &&
+      reminderAt &&
+      Date.now() >= new Date(reminderAt).getTime()
+    ) {
+      remindedRef.current = true;
+      startForegroundService(REMINDER_TEXT).catch(() => { /* notification update is best-effort */ });
+    }
+  };
 
   useEffect(() => {
     if (!isPunchedIn) {
@@ -120,13 +159,14 @@ export const useLocationTracker = (isPunchedIn: boolean): void => {
     }
 
     // ── Start ───────────────────────────────────────────────────────────────
+    remindedRef.current = false;
     if (Platform.OS === 'android') {
       startForegroundService()
         .catch(() => { /* foreground service unavailable — fall through to interval anyway */ })
         .then(() => {
           // First ping immediately, then every 5 minutes
-          collectAndSend();
-          intervalRef.current = setInterval(collectAndSend, INTERVAL_MS);
+          tick();
+          intervalRef.current = setInterval(tick, INTERVAL_MS);
         });
 
       return () => {
@@ -152,7 +192,7 @@ export const useLocationTracker = (isPunchedIn: boolean): void => {
         } catch { /* non-critical */ }
 
         try {
-          await liveTrackingApi.updateLocation({
+          const active = await liveTrackingApi.updateLocation({
             latitude,
             longitude,
             timestamp:   new Date().toISOString(),
@@ -161,6 +201,7 @@ export const useLocationTracker = (isPunchedIn: boolean): void => {
             altitude:    altitude ?? undefined,
             batteryLevel,
           });
+          if (!active) optionsRef.current.onDayClosed?.();
         } catch { /* best-effort */ }
       },
       () => { /* location error — skip silently */ },
@@ -176,7 +217,7 @@ export const useLocationTracker = (isPunchedIn: boolean): void => {
     );
 
     // Send first ping immediately without waiting for movement
-    collectAndSend();
+    tick();
     lastSentRef.current = Date.now();
 
     return () => {

@@ -17,22 +17,32 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { Loading } from '../../components/common';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import {
-  setCurrentPlan,
+  setPlans,
+  setPeriods,
+  setSettings,
+  upsertPlan,
   setCalendar,
   setLoading,
   setSaving,
-  loadDraftFromPlan,
   setViewMonth,
   setLastEditedDate,
 } from '../../store/slices/tourPlanSlice';
 import tourPlanApi from '../../services/api/tourPlanApi';
+import { refreshRejectedCounts } from '../../hooks/useRejectedCounts';
 import { COLORS, SIZES } from '../../constants';
 import { TourPlanStackParamList } from '../../types/navigation.types';
 import {
   ActivityType,
   DayPlan,
+  PlanPeriod,
   PlanStatus,
+  PlannedContact,
   TourPlanDetailResponse,
+  TourPlanResponse,
+  contactLabel,
+  contactsOfDetail,
+  dateKey,
+  planForDate,
 } from '../../types/tourPlan.types';
 
 type Nav = StackNavigationProp<TourPlanStackParamList, 'MTPCalendar'>;
@@ -87,6 +97,33 @@ const todayStr = (): string => toDateStr(new Date());
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 type WeekDay = { label: string; date: string; dayNum: number; inMonth: boolean };
+
+const parseDateStr = (s: string): Date => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/** Weekly plans: one strip page per plan week (all its days), as the server defines the weeks */
+const getWeeksFromPeriods = (periods: PlanPeriod[], month: number, year: number): WeekDay[][] =>
+  periods.map(period => {
+    const days: WeekDay[] = [];
+    const end = parseDateStr(dateKey(period.periodEnd));
+    for (const d = parseDateStr(dateKey(period.periodStart)); d <= end; d.setDate(d.getDate() + 1)) {
+      days.push({
+        label: DAY_NAMES[d.getDay()],
+        date: toDateStr(d),
+        dayNum: d.getDate(),
+        inMonth: d.getMonth() === month - 1 && d.getFullYear() === year,
+      });
+    }
+    return days;
+  });
+
+/** "Sat, 27 Sep" */
+const shortDate = (value: string): string => {
+  const d = parseDateStr(dateKey(value));
+  return `${DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()].slice(0, 3)}`;
+};
 
 /** Returns Mon–Fri weeks that cover the given month */
 const getWeeksForMonth = (month: number, year: number): WeekDay[][] => {
@@ -210,12 +247,36 @@ const buildCalendarRows = (
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+// "Request changes" is stored as a rejection whose remark starts with this marker
+const describeRejection = (remarks?: string | null) => {
+  const text = (remarks ?? '').trim();
+  if (text.startsWith('REQUEST_CHANGES:')) {
+    const note = text.slice('REQUEST_CHANGES:'.length).trim();
+    return note ? `Your manager requested changes: ${note}` : 'Your manager requested changes (no comment given).';
+  }
+  return text ? `Rejected by your manager: ${text}` : 'Rejected by your manager (no comment given).';
+};
+
 const MTPCalendarScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const dispatch = useAppDispatch();
   const insets = useSafeAreaInsets();
-  const { currentPlan, calendar, draftEntries, viewMonth, viewYear, loading, saving, lastEditedDate } =
-    useAppSelector((s: any) => s.tourPlan);
+  const { plans, periods, settings, calendar, draftEntries, viewMonth, viewYear, loading, saving, lastEditedDate } =
+    useAppSelector((s: any) => s.tourPlan) as {
+      plans: TourPlanResponse[];
+      periods: PlanPeriod[];
+      settings: { frequency: string; weeklyOffDays: string[] } | null;
+      calendar: any;
+      draftEntries: Record<string, any>;
+      viewMonth: number;
+      viewYear: number;
+      loading: boolean;
+      saving: boolean;
+      lastEditedDate: string | null;
+    };
+
+  // Weekly-approval customers plan and submit one week at a time: Week tab only
+  const isWeekly = settings?.frequency === 'Weekly';
 
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [selectedDate, setSelectedDate] = useState<string>(todayStr());
@@ -223,13 +284,23 @@ const MTPCalendarScreen: React.FC = () => {
   // Holds the date to scroll to after the screen regains focus
   const pendingScrollDate = useRef<string | null>(null);
 
-  // Scroll date strip to the week containing selectedDate when month changes
+  // Strip pages: the customer's plan weeks (weekly), or Mon–Fri weeks of the month (monthly)
+  const weeks = isWeekly && periods.length > 0
+    ? getWeeksFromPeriods(periods, viewMonth, viewYear)
+    : getWeeksForMonth(viewMonth, viewYear);
+
+  // Scroll date strip to the week containing selectedDate when month changes or the weeks load
   useEffect(() => {
-    const weeks = getWeeksForMonth(viewMonth, viewYear);
     const idx = weeks.findIndex(w => w.some(d => d.date === selectedDate));
     const target = idx >= 0 ? idx : 0;
     setTimeout(() => dateStripRef.current?.scrollToIndex({ index: target, animated: false }), 80);
-  }, [viewMonth, viewYear]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMonth, viewYear, weeks.length, isWeekly]);
+
+  // Weekly mode never shows the Month tab
+  useEffect(() => {
+    if (isWeekly) setViewMode('week');
+  }, [isWeekly]);
 
   // Capture lastEditedDate into a ref so it can be consumed after screen focus
   useEffect(() => {
@@ -248,32 +319,33 @@ const MTPCalendarScreen: React.FC = () => {
         pendingScrollDate.current = null;
         setSelectedDate(target);
         setViewMode('week');
-        const weeks = getWeeksForMonth(viewMonth, viewYear);
         const idx = weeks.findIndex(w => w.some(d => d.date === target));
         if (idx >= 0) {
           // Delay past the navigation transition (~300 ms) so the FlatList is laid out
           setTimeout(() => dateStripRef.current?.scrollToIndex({ index: idx, animated: true }), 350);
         }
       }
+    // Reload only when the month changes or the screen regains focus — not when the loaded weeks change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [viewMonth, viewYear]),
   );
 
   const loadMonthData = async (month: number, year: number) => {
     try {
       dispatch(setLoading(true));
-      const [plan, cal] = await Promise.all([
-        tourPlanApi.getMyPlanByMonth(month, year).catch(() => null),
+      const from = toDateStr(new Date(year, month - 1, 1));
+      const to = toDateStr(new Date(year, month, 0));
+      const [planSettings, monthPlans, cal, monthPeriods] = await Promise.all([
+        settings ? Promise.resolve(settings) : tourPlanApi.getSettings().catch(() => null),
+        tourPlanApi.getMyPlans(from, to).catch(() => [] as TourPlanResponse[]),
         tourPlanApi.getMonthlyCalendar(month, year).catch(() => null),
+        tourPlanApi.getPeriods(from, to).catch(() => [] as PlanPeriod[]),
       ]);
-      dispatch(setCurrentPlan(plan));
+      if (planSettings && !settings) dispatch(setSettings(planSettings as any));
+      // Rebuilds the editable drafts from every Draft / Rejected plan in the month
+      dispatch(setPlans(monthPlans));
+      dispatch(setPeriods(monthPeriods));
       dispatch(setCalendar(cal));
-      // Only hydrate from the server plan when it exists as a DRAFT.
-      // Do NOT clear local drafts when no server plan exists — the user may have
-      // just added local drafts that haven't been saved to the server yet.
-      // Drafts are cleared by setViewMonth (month navigation) instead.
-      if (plan?.approvalStatus === 'DRAFT') {
-        dispatch(loadDraftFromPlan(plan));
-      }
     } catch (err) {
       console.error('Failed to load month data:', err);
     } finally {
@@ -293,21 +365,44 @@ const MTPCalendarScreen: React.FC = () => {
     dispatch(setViewMonth({ month: m, year: y }));
   };
 
-  const canEdit = !currentPlan ||
-    currentPlan.approvalStatus === 'DRAFT' ||
-    currentPlan.approvalStatus === 'REJECTED';
+  // ── Per-day plan lookups (a month can hold several weekly plans) ─────────────
 
-  const planStatus: PlanStatus | 'none' = currentPlan?.approvalStatus ?? 'none';
+  /** The plan whose period holds the date (the month's plan for monthly customers) */
+  const planOf = (date: string): TourPlanResponse | undefined => planForDate(plans, date);
+  const statusOf = (date: string): PlanStatus | 'none' => planOf(date)?.approvalStatus ?? 'none';
+  /** A day can be edited unless its plan has been submitted or approved */
+  const canEditDate = (date: string) => {
+    const status = statusOf(date);
+    return status === 'none' || status === 'DRAFT' || status === 'REJECTED';
+  };
+  const detailOf = (date: string): TourPlanDetailResponse | undefined =>
+    planOf(date)?.details?.find((d: TourPlanDetailResponse) => d.planDate.startsWith(date));
+  /** The plan week (or month) holding the date, with its status and deadline */
+  const periodOf = (date: string): PlanPeriod | undefined =>
+    periods.find(p => dateKey(p.periodStart) <= date && dateKey(p.periodEnd) >= date);
+
+  // Weekly off days and holidays need no plan. Days outside the viewed month (in a week that
+  // straddles two months) aren't in the calendar, so fall back to the weekly off setting.
+  const isOffDay = (date: string) => {
+    const dayInfo = calendar?.days?.find((d: DayPlan) => d.date.startsWith(date));
+    if (dayInfo) return !!(dayInfo.isWeekend || dayInfo.isHoliday);
+    return !!settings?.weeklyOffDays?.includes(
+      ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parseDateStr(date).getDay()],
+    );
+  };
+
+  // Monthly customers: the month's single plan drives the Month tab and its Submit button
+  const monthPlan = plans.find(p => p.periodType !== 'Weekly') ?? plans[0];
+  const canEdit = canEditDate(selectedDate);
+  const planStatus: PlanStatus | 'none' = statusOf(selectedDate);
 
   const navigateToDayForm = (date: string) => {
-    const dayInfo = calendar?.days?.find((d: DayPlan) => d.date.startsWith(date));
-    if (dayInfo?.isWeekend || dayInfo?.isHoliday) return;
-    const locked = planStatus === 'APPROVED' || planStatus === 'PENDING';
+    if (isOffDay(date)) return;
+    const status = statusOf(date);
+    const locked = status === 'APPROVED' || status === 'PENDING';
 
     const draftEntry = draftEntries[date];
-    const serverDetail = currentPlan?.details?.find(
-      (d: TourPlanDetailResponse) => d.planDate.startsWith(date),
-    );
+    const serverDetail = detailOf(date);
 
     if (locked && !draftEntry && !serverDetail) return; // nothing to show
 
@@ -318,8 +413,7 @@ const MTPCalendarScreen: React.FC = () => {
       hqName:       serverDetail.headquartersName,
       routeId:      serverDetail.routeId,
       routeName:    serverDetail.routeName,
-      plannedDoctorIds:   serverDetail.plannedDoctorIds,
-      plannedDoctorNames: serverDetail.plannedContactNames,
+      plannedContacts:    contactsOfDetail(serverDetail),
       focusProductIds:    serverDetail.focusProductIds,
       estimatedCalls:     serverDetail.estimatedCalls,
       notes:              serverDetail.notes,
@@ -335,23 +429,23 @@ const MTPCalendarScreen: React.FC = () => {
     });
   };
 
-  const handleSubmit = async () => {
-    if (!currentPlan) {
-      // If there are unsaved drafts, save first
-      if (Object.keys(draftEntries).length > 0) {
-        Alert.alert('Save First', 'Please save your plan as a draft before submitting.');
-      } else {
-        Alert.alert('No Plan', 'Please add plans for at least one day before submitting.');
-      }
+  /** Submit one plan — the month's plan, or one week's plan for weekly customers */
+  const handleSubmit = async (plan: TourPlanResponse | undefined) => {
+    if (!plan) {
+      Alert.alert('No Plan', 'Please add plans for at least one day before submitting.');
       return;
     }
-    if (planStatus !== 'DRAFT') {
-      Alert.alert('Cannot Submit', 'Only a Draft plan can be submitted for approval.');
+    if (plan.approvalStatus !== 'DRAFT' && plan.approvalStatus !== 'REJECTED') {
+      Alert.alert('Cannot Submit', 'Only a Draft or Rejected plan can be submitted for approval.');
       return;
     }
+    const isResubmit = plan.approvalStatus === 'REJECTED';
+    const label = plan.periodLabel || `${MONTH_NAMES[viewMonth - 1]} ${viewYear}`;
     Alert.alert(
-      'Submit Tour Plan',
-      `Submit the tour plan for ${MONTH_NAMES[viewMonth - 1]} ${viewYear} for manager approval? It cannot be edited after submission.`,
+      isResubmit ? 'Resubmit Tour Plan' : 'Submit Tour Plan',
+      isResubmit
+        ? `Resubmit the corrected tour plan for ${label}? Your manager will see why it was rejected earlier. It cannot be edited after submission.`
+        : `Submit the tour plan for ${label} for manager approval? It cannot be edited after submission.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -359,9 +453,14 @@ const MTPCalendarScreen: React.FC = () => {
           onPress: async () => {
             try {
               dispatch(setSaving(true));
-              const submitted = await tourPlanApi.submit(currentPlan.id);
-              dispatch(setCurrentPlan(submitted));
-              Alert.alert('Submitted', 'Tour plan submitted for approval.');
+              const submitted = await tourPlanApi.submit(plan.id);
+              dispatch(upsertPlan(submitted));
+              // Refresh the week list so its status badge updates
+              const from = toDateStr(new Date(viewYear, viewMonth - 1, 1));
+              const to = toDateStr(new Date(viewYear, viewMonth, 0));
+              tourPlanApi.getPeriods(from, to).then(p => dispatch(setPeriods(p))).catch(() => undefined);
+              refreshRejectedCounts();
+              Alert.alert('Submitted', isResubmit ? 'Tour plan resubmitted for approval.' : 'Tour plan submitted for approval.');
             } catch (err: any) {
               Alert.alert('Error', err?.response?.data?.message || 'Submission failed.');
             } finally {
@@ -375,20 +474,80 @@ const MTPCalendarScreen: React.FC = () => {
 
   // ── Weekly view ───────────────────────────────────────────────────────────
 
-  const weeks = getWeeksForMonth(viewMonth, viewYear);
   const today = todayStr();
   const initialWeekIndex = Math.max(0, weeks.findIndex(w => w.some(d => d.date === today)));
 
+  // Weekly mode: swiping to another week selects it (today if it's in that week, else its first working day)
+  const handleWeekSwipe = (e: any) => {
+    if (!isWeekly) return;
+    const index = Math.round(e.nativeEvent.contentOffset.x / STRIP_W);
+    const week = weeks[index];
+    if (!week || week.some(d => d.date === selectedDate)) return;
+    const target = week.find(d => d.date === today) ?? week.find(d => !isOffDay(d.date)) ?? week[0];
+    setSelectedDate(target.date);
+  };
+
+  /** Weekly customers: status, deadline and Submit for the selected day's plan week */
+  const renderWeekHeader = () => {
+    const period = periodOf(selectedDate);
+    if (!period) return null;
+    const plan = plans.find(p => p.id === period.planId);
+    const status: PlanStatus | 'none' = (period.approvalStatus as PlanStatus | null) ?? 'none';
+    const canSubmit = !!plan && (status === 'DRAFT' || status === 'REJECTED');
+    const pastDeadline = (status === 'none' || status === 'DRAFT') && dateKey(period.submitBy) < today;
+
+    return (
+      <View style={styles.weekHeaderCard}>
+        <View style={styles.weekHeaderTop}>
+          <View style={styles.weekHeaderInfo}>
+            <Text style={styles.weekHeaderLabel}>{period.periodLabel}</Text>
+            <Text style={styles.weekHeaderMeta}>
+              {period.plannedDays} of {period.totalWorkingDays} working days planned
+            </Text>
+          </View>
+          <View style={[styles.planBadge, { backgroundColor: status === 'none' ? COLORS.backgroundGray : STATUS_BG[status] }]}>
+            <Text style={[styles.planBadgeText, { color: STATUS_COLOR[status] }]}>
+              {status === 'none' ? 'Not started' : STATUS_LABEL[status]}
+            </Text>
+          </View>
+        </View>
+
+        {(status === 'none' || status === 'DRAFT' || status === 'REJECTED') && (
+          <Text style={[styles.weekHeaderDeadline, pastDeadline && styles.weekHeaderDeadlineLate]}>
+            {pastDeadline ? 'Was due by ' : 'Submit by '}{shortDate(period.submitBy)}
+          </Text>
+        )}
+
+        {status === 'REJECTED' && (
+          <View style={[styles.remarksCard, styles.weekHeaderRemarks]}>
+            <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.error} />
+            <Text style={styles.remarksText}>
+              {describeRejection(period.approverRemarks)}{'\n'}Fix the week's days, then tap Resubmit Week.
+            </Text>
+          </View>
+        )}
+
+        {canSubmit && (
+          <TouchableOpacity style={styles.weekSubmitBtn} onPress={() => handleSubmit(plan)} activeOpacity={0.85}>
+            <MaterialCommunityIcons name="send" size={16} color={COLORS.textWhite} />
+            <Text style={styles.weekSubmitText}>{status === 'REJECTED' ? 'Resubmit Week' : 'Submit Week'}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   const renderWeeklyView = () => {
     const draft = draftEntries[selectedDate];
-    const detail = currentPlan?.details?.find((d: TourPlanDetailResponse) => d.planDate.startsWith(selectedDate));
+    const detail = detailOf(selectedDate);
     const hasPlan = !!(draft || detail);
-    const dayInfo = calendar?.days?.find((d: DayPlan) => d.date.startsWith(selectedDate));
-    const isBlocked = dayInfo?.isWeekend || dayInfo?.isHoliday;
+    const dayContacts: PlannedContact[] = draft?.plannedContacts ?? (detail ? contactsOfDetail(detail) : []);
+    const isBlocked = isOffDay(selectedDate);
+    const selectedPlan = planOf(selectedDate);
 
     return (
       <>
-        {/* Paged date strip — each page = one Mon–Fri week */}
+        {/* Paged date strip — each page is one plan week (weekly) or one Mon–Fri week (monthly) */}
         <FlatList
           ref={dateStripRef}
           horizontal
@@ -399,6 +558,7 @@ const MTPCalendarScreen: React.FC = () => {
           style={styles.dateStripList}
           initialScrollIndex={initialWeekIndex}
           getItemLayout={(_, index) => ({ length: STRIP_W, offset: STRIP_W * index, index })}
+          onMomentumScrollEnd={handleWeekSwipe}
           renderItem={({ item: weekDays }) => (
             <View style={styles.weekRow}>
               {weekDays.map(({ label, date, dayNum, inMonth }) => {
@@ -409,8 +569,9 @@ const MTPCalendarScreen: React.FC = () => {
                     key={date}
                     style={[
                       styles.dateCard,
+                      isWeekly && styles.dateCardCompact,
                       isSelected && styles.dateCardActive,
-                      !inMonth && styles.dateCardOtherMonth,
+                      (!inMonth || (isWeekly && isOffDay(date))) && styles.dateCardOtherMonth,
                     ]}
                     onPress={() => setSelectedDate(date)}
                     activeOpacity={0.75}
@@ -431,6 +592,8 @@ const MTPCalendarScreen: React.FC = () => {
             </View>
           )}
         />
+
+        {isWeekly && renderWeekHeader()}
 
         {/* Itinerary header */}
         <View style={styles.itineraryHeader}>
@@ -505,19 +668,19 @@ const MTPCalendarScreen: React.FC = () => {
                 </View>
               ) : null}
 
-              {/* Contact list */}
-              {(draft?.plannedDoctorNames?.length ?? 0) > 0 && (
+              {/* Contact list — from the local draft, or the server day for a submitted/approved plan */}
+              {dayContacts.length > 0 && (
                 <View style={styles.contactSection}>
                   <View style={styles.contactSectionHeader}>
                     <MaterialCommunityIcons name="account-group-outline" size={15} color={COLORS.textSecondary} />
                     <Text style={styles.contactSectionTitle}>
-                      {draft!.plannedDoctorNames!.length} Contact{draft!.plannedDoctorNames!.length > 1 ? 's' : ''} Planned
+                      {dayContacts.length} Contact{dayContacts.length > 1 ? 's' : ''} Planned
                     </Text>
                   </View>
-                  {draft!.plannedDoctorNames!.map((name, i) => (
-                    <View key={i} style={styles.contactRow}>
+                  {dayContacts.map(contact => (
+                    <View key={contact.id} style={styles.contactRow}>
                       <View style={styles.contactDot} />
-                      <Text style={styles.contactName} numberOfLines={1}>{name}</Text>
+                      <Text style={styles.contactName} numberOfLines={1}>{contactLabel(contact)}</Text>
                     </View>
                   ))}
                 </View>
@@ -536,21 +699,29 @@ const MTPCalendarScreen: React.FC = () => {
           </TouchableOpacity>
         )}
 
-        {/* Rejected remarks */}
-        {currentPlan?.approvalStatus === 'REJECTED' && currentPlan.approverRemarks && (
+        {/* Rejected remarks (weekly plans show them in the week header instead) */}
+        {!isWeekly && selectedPlan?.approvalStatus === 'REJECTED' && (
           <View style={styles.remarksCard}>
             <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.error} />
-            <Text style={styles.remarksText}>{currentPlan.approverRemarks}</Text>
+            <Text style={styles.remarksText}>
+              {describeRejection(selectedPlan.approverRemarks)}{'\n'}Fix the plan, save, then tap Resubmit.
+            </Text>
           </View>
         )}
 
         {/* Submit reminder — shown only on days that have a plan, while status is still DRAFT */}
-        {currentPlan && planStatus === 'DRAFT' && hasPlan && (
+        {selectedPlan && planStatus === 'DRAFT' && hasPlan && (
           <View style={styles.infoBanner}>
             <MaterialCommunityIcons name="information-outline" size={16} color="#1d4ed8" style={{ marginTop: 1 }} />
-            <Text style={styles.infoBannerText}>
-              Plan saved. Once you've planned all days, go to <Text style={styles.infoBannerBold}>Month</Text> view and tap <Text style={styles.infoBannerBold}>Submit Plan</Text> to send for approval.
-            </Text>
+            {isWeekly ? (
+              <Text style={styles.infoBannerText}>
+                Plan saved. Once you've planned the whole week, tap <Text style={styles.infoBannerBold}>Submit Week</Text> above to send it for approval.
+              </Text>
+            ) : (
+              <Text style={styles.infoBannerText}>
+                Plan saved. Once you've planned all days, go to <Text style={styles.infoBannerBold}>Month</Text> view and tap <Text style={styles.infoBannerBold}>Submit Plan</Text> to send for approval.
+              </Text>
+            )}
           </View>
         )}
       </>
@@ -562,9 +733,11 @@ const MTPCalendarScreen: React.FC = () => {
   const renderMonthlyView = () => {
     const rows = buildCalendarRows(
       viewMonth, viewYear, calendar, draftEntries,
-      currentPlan?.details ?? [], today,
+      monthPlan?.details ?? [], today,
     );
-    const canSubmit = !!currentPlan && planStatus === 'DRAFT';
+    // A rejected plan can be corrected and resubmitted
+    const monthStatus: PlanStatus | 'none' = monthPlan?.approvalStatus ?? 'none';
+    const canSubmit = !!monthPlan && (monthStatus === 'DRAFT' || monthStatus === 'REJECTED');
 
     return (
       <>
@@ -617,22 +790,26 @@ const MTPCalendarScreen: React.FC = () => {
         ))}
 
         {/* Rejected remarks */}
-        {currentPlan?.approvalStatus === 'REJECTED' && currentPlan.approverRemarks && (
+        {monthPlan?.approvalStatus === 'REJECTED' && (
           <View style={[styles.remarksCard, { marginTop: SIZES.paddingMD }]}>
             <MaterialCommunityIcons name="alert-circle" size={16} color={COLORS.error} />
-            <Text style={styles.remarksText}>{currentPlan.approverRemarks}</Text>
+            <Text style={styles.remarksText}>
+              {describeRejection(monthPlan.approverRemarks)}{'\n'}Fix the plan, save, then tap Resubmit.
+            </Text>
           </View>
         )}
 
         {/* Submit Plan for Approval button */}
         <TouchableOpacity
           style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
-          onPress={handleSubmit}
+          onPress={() => handleSubmit(monthPlan)}
           disabled={!canSubmit}
           activeOpacity={0.85}
         >
           <MaterialCommunityIcons name="send" size={18} color={COLORS.textWhite} />
-          <Text style={styles.submitBtnText}>Submit Plan for Approval</Text>
+          <Text style={styles.submitBtnText}>
+            {monthStatus === 'REJECTED' ? 'Resubmit Plan for Approval' : 'Submit Plan for Approval'}
+          </Text>
         </TouchableOpacity>
       </>
     );
@@ -644,7 +821,7 @@ const MTPCalendarScreen: React.FC = () => {
     <View style={styles.container}>
       {/* Custom white header — paddingTop absorbs the status bar height */}
       <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <Text style={styles.headerTitle}>Monthly Tour Plan</Text>
+        <Text style={styles.headerTitle}>{isWeekly ? 'Weekly Tour Plan' : 'Monthly Tour Plan'}</Text>
         <TouchableOpacity
           onPress={() => navigation.navigate('MTPSummary')}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -664,22 +841,24 @@ const MTPCalendarScreen: React.FC = () => {
         </TouchableOpacity>
       </View>
 
-      {/* Week / Month toggle */}
-      <View style={styles.toggleRow}>
-        <View style={styles.toggle}>
-          {(['week', 'month'] as const).map(mode => (
-            <TouchableOpacity
-              key={mode}
-              style={[styles.toggleBtn, viewMode === mode && styles.toggleBtnActive]}
-              onPress={() => setViewMode(mode)}
-            >
-              <Text style={[styles.toggleBtnText, viewMode === mode && styles.toggleBtnTextActive]}>
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
+      {/* Week / Month toggle — weekly-approval customers plan one week at a time, so Week only */}
+      {!isWeekly && (
+        <View style={styles.toggleRow}>
+          <View style={styles.toggle}>
+            {(['week', 'month'] as const).map(mode => (
+              <TouchableOpacity
+                key={mode}
+                style={[styles.toggleBtn, viewMode === mode && styles.toggleBtnActive]}
+                onPress={() => setViewMode(mode)}
+              >
+                <Text style={[styles.toggleBtnText, viewMode === mode && styles.toggleBtnTextActive]}>
+                  {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Content */}
       {loading ? (
@@ -697,9 +876,7 @@ const MTPCalendarScreen: React.FC = () => {
       )}
 
       {/* FAB — only shown when the selected day has no plan yet */}
-      {canEdit && !draftEntries[selectedDate] && !currentPlan?.details?.find(
-        (d: TourPlanDetailResponse) => d.planDate.startsWith(selectedDate),
-      ) && (
+      {canEdit && !isOffDay(selectedDate) && !draftEntries[selectedDate] && !detailOf(selectedDate) && (
         <TouchableOpacity
           style={styles.fab}
           onPress={() => navigateToDayForm(selectedDate)}
@@ -823,6 +1000,60 @@ const styles = StyleSheet.create({
   },
   dateCardOtherMonth: {
     opacity: 0.35,
+  },
+  // Weekly plans show all 7 days of the week, so the cards sit closer together
+  dateCardCompact: {
+    marginHorizontal: 2,
+    borderRadius: 12,
+  },
+
+  /* Weekly plans — week header with status, deadline and Submit */
+  weekHeaderCard: {
+    backgroundColor: COLORS.background,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    padding: SIZES.paddingMD,
+    marginBottom: SIZES.paddingMD,
+    gap: 8,
+  },
+  weekHeaderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  weekHeaderInfo: { flex: 1 },
+  weekHeaderLabel: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  weekHeaderMeta: {
+    fontSize: SIZES.fontXS,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+  },
+  weekHeaderDeadline: {
+    fontSize: SIZES.fontSM,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
+  weekHeaderDeadlineLate: { color: COLORS.error },
+  weekHeaderRemarks: { marginBottom: 0 },
+  weekSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.primary,
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  weekSubmitText: {
+    fontSize: SIZES.fontMD,
+    fontWeight: '700',
+    color: COLORS.textWhite,
   },
   dateCardActive: {
     backgroundColor: COLORS.primary,

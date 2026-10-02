@@ -22,6 +22,7 @@ import {
   CameraOptions,
 } from 'react-native-image-picker';
 import { expenseApi, storageApi } from '../../services/api';
+import { refreshRejectedCounts } from '../../hooks/useRejectedCounts';
 import { ExpenseCategory } from '../../types/expense.types';
 import { ExpenseStackParamList } from '../../types/navigation.types';
 import { COLORS, SIZES } from '../../constants';
@@ -144,6 +145,7 @@ const EditExpenseScreen: React.FC = () => {
         description: description.trim() || undefined,
         receiptUrl: receiptUrl || undefined,
       });
+      refreshRejectedCounts();
       showAlert('Resubmitted', 'Your expense has been resubmitted for approval.', () => navigation.goBack());
     } catch (error: any) {
       const msg = error?.response?.data?.message || 'Failed to update expense.';

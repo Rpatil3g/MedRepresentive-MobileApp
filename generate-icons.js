@@ -1,5 +1,5 @@
 /**
- * App Icon Generator for GoodPharma MR
+ * App Icon Generator for EterniRo Field Force
  *
  * Usage:
  *   1. Save your source icon image as "icon-source.png" in this directory

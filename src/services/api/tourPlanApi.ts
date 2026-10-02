@@ -5,12 +5,35 @@ import {
   TourPlanResponse,
   MonthlyPlanCalendar,
   TourPlanSummary,
+  PlanPeriod,
+  PlanningSettings,
 } from '../../types/tourPlan.types';
 
 const BASE = API_CONFIG.ENDPOINTS.TOUR_PLANS;
 
 const tourPlanApi = {
-  /** Create or update a draft for the given month/year */
+  /** The customer's planning setup — weekly or monthly plans, week start, weekly offs */
+  getSettings: async (): Promise<PlanningSettings> => {
+    const response = await axiosInstance.get(`${BASE}/settings`);
+    return response.data;
+  },
+
+  /** Every plan with days in the range (one monthly plan, or several weekly ones); dates 'YYYY-MM-DD' */
+  getMyPlans: async (fromDate: string, toDate: string): Promise<TourPlanResponse[]> => {
+    const response = await axiosInstance.get(`${BASE}/my-plans`, { params: { fromDate, toDate } });
+    return response.data ?? [];
+  },
+
+  /** The weeks/months to plan in the range, each with its plan status and submit-by date */
+  getPeriods: async (fromDate: string, toDate: string): Promise<PlanPeriod[]> => {
+    const response = await axiosInstance.get(`${BASE}/periods`, { params: { fromDate, toDate } });
+    return response.data ?? [];
+  },
+
+  /**
+   * Save planned days. Each day goes into the plan for its own week/month (created as a draft
+   * if needed); returns the plan of the first day sent.
+   */
   createOrUpdate: async (data: CreateTourPlanRequest): Promise<TourPlanResponse> => {
     const response = await axiosInstance.post(BASE, data);
     return response.data;

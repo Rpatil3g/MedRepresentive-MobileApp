@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**GoodPharma MR** — a React Native mobile app for Medical Representatives (field sales agents in pharma). It connects to a .NET backend (`GoodPharma.API`) over REST. Key MR workflows: attendance punch-in/out, doctor visits (check-in/check-out), Daily Call Reports (DCR), Monthly Tour Plans (MTP), product catalog, tasks, and live GPS tracking while on duty.
+**EterniRo Field Force** (formerly "GoodPharma MR") — a React Native mobile app for Medical Representatives (field sales agents in pharma). It connects to a .NET backend (`GoodPharma.API`) over REST. Key MR workflows: attendance punch-in/out, doctor visits (check-in/check-out), Daily Call Reports (DCR), Monthly Tour Plans (MTP), product catalog, tasks, and live GPS tracking while on duty.
 
 ## Commands
 
@@ -38,7 +38,7 @@ Copy `.env.development` and adjust for your environment. Variables are consumed 
 API_BASE_URL=http://<your-machine-ip>:<port>
 API_PREFIX=/api/v1
 API_TIMEOUT=30000
-APP_NAME=GoodPharma MR
+APP_NAME=EterniRo Field Force
 ```
 
 On Android the axios instance automatically replaces `localhost` with `10.0.2.2` for emulator compatibility ([src/services/api/axiosInstance.ts](src/services/api/axiosInstance.ts)).

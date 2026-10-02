@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useContext, useEffect, useState } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet, Modal } from 'react-native';
+import { NavigationContext } from '@react-navigation/native';
 import { COLORS, SIZES } from '../../constants';
 
 export interface LoadingProps {
@@ -7,9 +8,34 @@ export interface LoadingProps {
   message?: string;
 }
 
+/**
+ * Whether the screen this component sits in is the one on screen. A Modal draws over the whole
+ * app, so without this a screen further down a stack (e.g. Visit List under Log Visit) would
+ * cover the screen in front with its spinner. Outside a navigator it always counts as focused.
+ */
+const useScreenFocused = (): boolean => {
+  const navigation = useContext(NavigationContext);
+  const [focused, setFocused] = useState(() => navigation?.isFocused() ?? true);
+
+  useEffect(() => {
+    if (!navigation) return undefined;
+    setFocused(navigation.isFocused());
+    const unsubscribeFocus = navigation.addListener('focus', () => setFocused(true));
+    const unsubscribeBlur = navigation.addListener('blur', () => setFocused(false));
+    return () => {
+      unsubscribeFocus();
+      unsubscribeBlur();
+    };
+  }, [navigation]);
+
+  return focused;
+};
+
 const Loading: React.FC<LoadingProps> = ({ visible, message }) => {
+  const focused = useScreenFocused();
+
   return (
-    <Modal transparent visible={visible} animationType="fade">
+    <Modal transparent visible={visible && focused} animationType="fade">
       <View style={styles.container}>
         <View style={styles.content}>
           <ActivityIndicator size="large" color={COLORS.primary} />
@@ -43,4 +69,3 @@ const styles = StyleSheet.create({
 });
 
 export default Loading;
-

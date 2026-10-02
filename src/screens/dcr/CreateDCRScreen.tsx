@@ -16,6 +16,7 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import { useAppDispatch } from '../../store/hooks';
 import { addDCR, updateDCR as updateDCRAction } from '../../store/slices/dcrSlice';
 import { dcrApi, visitApi, attendanceApi, expenseApi } from '../../services/api';
+import { refreshRejectedCounts } from '../../hooks/useRejectedCounts';
 import { Expense } from '../../types/expense.types';
 import { CreateDCRRequest, DailyCallReport } from '../../types/dcr.types';
 import { Visit } from '../../types/visit.types';
@@ -142,7 +143,7 @@ const CreateDCRScreen: React.FC = () => {
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
-            { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } },
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'EterniRoFieldForce/1.0' } },
           );
           const data = await res.json();
           if (data.display_name) address = data.display_name as string;
@@ -197,6 +198,7 @@ const CreateDCRScreen: React.FC = () => {
 
       if (!isDraft) {
         await dcrApi.submitDCR(savedDCR.id);
+        refreshRejectedCounts();
       }
 
       showAlert(
@@ -386,9 +388,10 @@ const CreateDCRScreen: React.FC = () => {
             <Text style={styles.cardTitle}>Expenses</Text>
             <TouchableOpacity
               style={styles.manageBtn}
+              // No expenses yet: straight to the form. Either way, saving returns here.
               onPress={() => (navigation as any).navigate('Expenses', {
-                screen: 'ExpenseList',
-                params: { date: reportDate.split('T')[0] },
+                screen: dayExpenses.length === 0 ? 'AddExpense' : 'ExpenseList',
+                params: { date: reportDate.split('T')[0], returnTo: 'DCR' },
               })}
             >
               <MaterialCommunityIcons name="plus" size={14} color={COLORS.primary} />

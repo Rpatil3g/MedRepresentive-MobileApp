@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Generates the client data-collection workbook for GoodPharma MR.
+Generates the client data-collection workbook for EterniRo Field Force.
 Sheet order == import order (each sheet references the ones above it by business key).
 
 Run:  python docs/data-collection/generate_template.py
@@ -12,7 +12,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                   "GoodPharma_MR_Master_Data_Template.xlsx")
+                   "EterniRo_Field_Force_Master_Data_Template.xlsx")
 
 # ---- styling -----------------------------------------------------------------
 REQ_FILL  = PatternFill("solid", fgColor="C00000")   # dark red  = mandatory
@@ -80,7 +80,7 @@ readme.column_dimensions["B"].width = 34
 readme.column_dimensions["C"].width = 96
 
 rows = [
-    ("title", "GoodPharma MR - Master Data Collection Template", ""),
+    ("title", "EterniRo Field Force - Master Data Collection Template", ""),
     ("", "", ""),
     ("h",  "How to read the headers", ""),
     ("kv", "RED header + *",  "MANDATORY. The row cannot be imported without this value."),

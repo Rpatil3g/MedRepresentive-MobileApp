@@ -3,12 +3,21 @@ import {
   TourPlanResponse,
   MonthlyPlanCalendar,
   DraftDayEntry,
+  PlanPeriod,
+  PlanningSettings,
+  contactsOfDetail,
 } from '../../types/tourPlan.types';
 
 interface TourPlanState {
-  currentPlan: TourPlanResponse | null;
+  /** Every plan with days in the viewed month — one monthly plan, or several weekly ones */
+  plans: TourPlanResponse[];
+  /** The weeks (or month) to plan in the viewed month, with status and submit-by date */
+  periods: PlanPeriod[];
+  /** Customer's planning setup (weekly or monthly); null until loaded */
+  settings: PlanningSettings | null;
   calendar: MonthlyPlanCalendar | null;
-  draftEntries: Record<string, DraftDayEntry>; // keyed by 'YYYY-MM-DD'
+  /** Days of plans that can still be edited (Draft / Rejected), keyed by 'YYYY-MM-DD' */
+  draftEntries: Record<string, DraftDayEntry>;
   viewMonth: number;
   viewYear: number;
   lastEditedDate: string | null; // set after saving a day plan so the calendar can scroll to it
@@ -20,7 +29,9 @@ interface TourPlanState {
 const now = new Date();
 
 const initialState: TourPlanState = {
-  currentPlan: null,
+  plans: [],
+  periods: [],
+  settings: null,
   calendar: null,
   draftEntries: {},
   viewMonth: now.getMonth() + 1,
@@ -31,6 +42,39 @@ const initialState: TourPlanState = {
   error: null,
 };
 
+const isEditable = (plan: TourPlanResponse) =>
+  plan.approvalStatus === 'DRAFT' || plan.approvalStatus === 'REJECTED';
+
+/** Draft entries for every day of the editable plans, keeping locally cached display values */
+const buildDrafts = (
+  plans: TourPlanResponse[],
+  existing: Record<string, DraftDayEntry>,
+): Record<string, DraftDayEntry> => {
+  const entries: Record<string, DraftDayEntry> = {};
+  for (const plan of plans.filter(isEditable)) {
+    for (const d of plan.details) {
+      const key = d.planDate.split('T')[0];
+      const cached = existing[key];
+      entries[key] = {
+        date: key,
+        activityType: d.activityType,
+        // Fall back to locally-cached values when the server has no HQ for the day
+        hqId: d.headquartersId ?? cached?.hqId,
+        hqName: d.headquartersName ?? cached?.hqName,
+        routeId: d.routeId,
+        routeName: d.routeName,
+        plannedContacts: contactsOfDetail(d),
+        focusProductIds: d.focusProductIds,
+        focusProductNames: cached?.focusProductNames,
+        estimatedCalls: d.estimatedCalls,
+        notes: d.notes,
+        leaveType: d.leaveType,
+      };
+    }
+  }
+  return entries;
+};
+
 const tourPlanSlice = createSlice({
   name: 'tourPlan',
   initialState,
@@ -39,12 +83,27 @@ const tourPlanSlice = createSlice({
       state.viewMonth = action.payload.month;
       state.viewYear = action.payload.year;
       // Clear data when navigating to a different month
-      state.currentPlan = null;
+      state.plans = [];
+      state.periods = [];
       state.calendar = null;
       state.draftEntries = {};
     },
-    setCurrentPlan: (state, action: PayloadAction<TourPlanResponse | null>) => {
-      state.currentPlan = action.payload;
+    setSettings: (state, action: PayloadAction<PlanningSettings | null>) => {
+      state.settings = action.payload;
+    },
+    /** Replace the month's plans (and rebuild the editable drafts from them) */
+    setPlans: (state, action: PayloadAction<TourPlanResponse[]>) => {
+      state.plans = action.payload;
+      state.draftEntries = buildDrafts(action.payload, state.draftEntries);
+    },
+    /** Add or replace one plan, e.g. after saving a day or submitting a week */
+    upsertPlan: (state, action: PayloadAction<TourPlanResponse>) => {
+      const others = state.plans.filter(p => p.id !== action.payload.id);
+      state.plans = [...others, action.payload].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+      state.draftEntries = buildDrafts(state.plans, state.draftEntries);
+    },
+    setPeriods: (state, action: PayloadAction<PlanPeriod[]>) => {
+      state.periods = action.payload;
     },
     setCalendar: (state, action: PayloadAction<MonthlyPlanCalendar | null>) => {
       state.calendar = action.payload;
@@ -54,30 +113,6 @@ const tourPlanSlice = createSlice({
     },
     removeDraftEntry: (state, action: PayloadAction<string>) => {
       delete state.draftEntries[action.payload];
-    },
-    loadDraftFromPlan: (state, action: PayloadAction<TourPlanResponse>) => {
-      const entries: Record<string, DraftDayEntry> = {};
-      for (const d of action.payload.details) {
-        const dateKey = d.planDate.split('T')[0];
-        const existing = state.draftEntries[dateKey];
-        entries[dateKey] = {
-          date: dateKey,
-          activityType: d.activityType,
-          // Fall back to locally-cached values when the server has no HQ for the day
-          hqId: d.headquartersId ?? existing?.hqId,
-          hqName: d.headquartersName ?? existing?.hqName,
-          routeId: d.routeId,
-          routeName: d.routeName,
-          plannedDoctorIds: d.plannedDoctorIds,
-          plannedDoctorNames: d.plannedContactNames?.length ? d.plannedContactNames : existing?.plannedDoctorNames,
-          focusProductIds: d.focusProductIds,
-          focusProductNames: existing?.focusProductNames,
-          estimatedCalls: d.estimatedCalls,
-          notes: d.notes,
-          leaveType: d.leaveType,
-        };
-      }
-      state.draftEntries = entries;
     },
     clearDraft: (state) => {
       state.draftEntries = {};
@@ -99,11 +134,13 @@ const tourPlanSlice = createSlice({
 
 export const {
   setViewMonth,
-  setCurrentPlan,
+  setSettings,
+  setPlans,
+  upsertPlan,
+  setPeriods,
   setCalendar,
   upsertDraftEntry,
   removeDraftEntry,
-  loadDraftFromPlan,
   clearDraft,
   setLastEditedDate,
   setLoading,

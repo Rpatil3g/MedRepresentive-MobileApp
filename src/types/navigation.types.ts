@@ -20,6 +20,7 @@ export type MainTabParamList = {
   DCR: NavigatorScreenParams<DCRStackParamList>;
   Doctors: NavigatorScreenParams<DoctorStackParamList>;
   Expenses: NavigatorScreenParams<ExpenseStackParamList>;
+  Orders: NavigatorScreenParams<OrderStackParamList>;
 };
 
 // Attendance Stack
@@ -59,7 +60,15 @@ export type DoctorStackParamList = {
 // Visit Stack
 export type VisitStackParamList = {
   VisitList: undefined;
-  LogVisit: { doctorId?: string; chemistId?: string };
+  // Pass one of doctorId / chemistId / stockistId to pre-select the party; fromPlan when it came
+  // from today's call plan. returnTo: 'Dashboard' when opened from Home — saving goes back there
+  LogVisit: {
+    doctorId?: string;
+    chemistId?: string;
+    stockistId?: string;
+    fromPlan?: boolean;
+    returnTo?: 'Dashboard';
+  };
   VisitDetail: { visitId: string };
   VisitEdit: { visitId: string };
 };
@@ -80,9 +89,24 @@ export type TaskStackParamList = {
 
 // Expense Stack
 export type ExpenseStackParamList = {
-  ExpenseList: { date?: string } | undefined;
-  AddExpense: { date?: string } | undefined;
+  // returnTo: 'DCR' when opened from the DCR screen — saving an expense goes back there
+  ExpenseList: { date?: string; returnTo?: 'DCR' } | undefined;
+  AddExpense: { date?: string; returnTo?: 'DCR' } | undefined;
   EditExpense: { expenseId: string };
+};
+
+// Order Stack
+export type OrderStackParamList = {
+  OrderList: undefined;
+  /** From Log Visit: the visit's chemist or stockist is preselected and the order is linked to the visit. */
+  BookOrder: {
+    visitId?: string;
+    chemistId?: string;
+    stockistId?: string;
+    partyName?: string;
+  } | undefined;
+  OrderDetail: { orderId: string };
+  MyTargets: undefined;
 };
 
 // More Stack
@@ -90,6 +114,7 @@ export type MoreStackParamList = {
   More: undefined;
   TaskList: undefined;
   TaskDetail: { taskId: string };
+  MyAttendance: undefined;
   ChangePassword: undefined;
   HelpSupport: undefined;
   About: undefined;

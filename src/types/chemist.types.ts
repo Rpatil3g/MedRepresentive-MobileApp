@@ -28,7 +28,7 @@ export interface Chemist {
 }
 
 export interface CreateChemistRequest {
-  chemistName: string;
+  chemistName?: string;  // owner name — optional when adding
   pharmacyName: string;
   routeId?: string;
   licenseNumber?: string;

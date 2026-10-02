@@ -7,6 +7,7 @@ import {
   Platform,
   ScrollView,
   Alert,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useForm, Controller } from 'react-hook-form';
@@ -67,11 +68,15 @@ const LoginScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoContainer}>
-          <View style={styles.logoPlaceholder}>
-            <Text style={styles.logoText}>GP</Text>
-          </View>
+          <Image
+            source={require('../../assets/brand/logo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+            accessibilityLabel="EterniRo"
+          />
+          <Text style={styles.productName}>Field Force</Text>
           <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to your GoodPharma account</Text>
+          <Text style={styles.subtitle}>Sign in to your EterniRo Field Force account</Text>
         </View>
 
         <View style={styles.formContainer}>
@@ -147,19 +152,17 @@ const styles = StyleSheet.create({
     marginTop: SIZES.paddingXL * 2,
     marginBottom: SIZES.paddingXL,
   },
-  logoPlaceholder: {
-    width: 80,
-    height: 80,
-    borderRadius: 18,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SIZES.paddingMD,
+  logo: {
+    width: 120,
+    height: 137,
   },
-  logoText: {
-    fontSize: SIZES.font2XL,
-    fontWeight: 'bold',
-    color: COLORS.textWhite,
+  productName: {
+    fontSize: SIZES.fontLG,
+    fontWeight: '600',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: COLORS.textSecondary,
+    marginBottom: SIZES.paddingLG,
   },
   subtitle: {
     fontSize: SIZES.fontMD,

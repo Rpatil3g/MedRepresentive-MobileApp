@@ -23,14 +23,16 @@ import { format } from 'date-fns';
 import { Button, Loading } from '../../components/common';
 import { useAppDispatch } from '../../store/hooks';
 import { addVisit } from '../../store/slices/visitSlice';
-import { visitApi, doctorApi, chemistApi, stockistApi, productApi, lookupApi, storageApi } from '../../services/api';
+import { visitApi, doctorApi, chemistApi, stockistApi, productApi, lookupApi, storageApi, attendanceApi } from '../../services/api';
 import { Doctor } from '../../types/doctor.types';
 import { Chemist } from '../../types/chemist.types';
+import { Stockist } from '../../services/api/stockistApi';
 import { Product } from '../../types/product.types';
 import { VisitPhotoRequest } from '../../types/visit.types';
 import { VisitStackParamList } from '../../types/navigation.types';
-import { COLORS, SIZES } from '../../constants';
+import { COLORS, SIZES, ROUTES } from '../../constants';
 import { requestLocationPermission, showAlert } from '../../utils/helpers';
+import { punchErrorMessage, punchInNow } from '../../utils/punch';
 
 type LogVisitRouteProp = RouteProp<VisitStackParamList, 'LogVisit'>;
 
@@ -44,7 +46,6 @@ interface PhotoEntry {
   uri: string;
   photoType: string;
   caption: string;
-  isFront: boolean;
 }
 
 const PHOTO_TYPES = ['WithDoctor', 'Clinic', 'ProductDisplay'];
@@ -55,6 +56,34 @@ interface PartyOption {
   details: string;
   geoLocation?: { latitude: number; longitude: number };
 }
+
+// Same shape whether the party was searched for or pre-selected from the call plan
+const doctorToParty = (d: Doctor): PartyOption => ({
+  id: d.id,
+  name: d.doctorName,
+  details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
+  geoLocation: d.geoLocation,
+});
+
+const chemistToParty = (c: Chemist): PartyOption => ({
+  id: c.id,
+  name: c.pharmacyName || c.chemistName,
+  details: [c.chemistName, c.category, c.address, c.city].filter(Boolean).join(' • '),
+  geoLocation:
+    c.latitude !== undefined && c.longitude !== undefined
+      ? { latitude: c.latitude, longitude: c.longitude }
+      : undefined,
+});
+
+const stockistToParty = (s: Stockist): PartyOption => ({
+  id: s.id,
+  name: s.stockistName,
+  details: [s.companyName, s.city, s.contactPerson].filter(Boolean).join(' • '),
+  geoLocation:
+    s.latitude !== undefined && s.longitude !== undefined
+      ? { latitude: s.latitude!, longitude: s.longitude! }
+      : undefined,
+});
 
 const GEO_WARN_THRESHOLD_M  = 500;   // yellow warning
 const GEO_BLOCK_THRESHOLD_M = 2000;  // hard block — visit cannot be submitted
@@ -78,7 +107,7 @@ const haversineDistance = (
 // Fallback values used while the API response is loading or if it fails.
 // These are NOT the source of truth — Master.LookupValues table is.
 const FALLBACK_VISIT_TYPES  = ['Doctor / Clinic', 'Chemist / Pharmacy', 'Stockist'];
-const FALLBACK_CALL_TYPES   = ['Routine', 'Follow Up', 'Campaign', 'Cold Call'];
+const FALLBACK_CALL_TYPES   = ['Routine', 'Follow Up', 'Campaign', 'Cold Call', 'Celebration'];
 const FALLBACK_VISIT_OUTCOMES = ['Met', 'Not Available', 'Busy / Refused', 'On Leave'];
 
 // ─── Reusable Picker Modal ───────────────────────────────────────────────────
@@ -136,7 +165,8 @@ const LogVisitScreen: React.FC = () => {
   const route = useRoute<LogVisitRouteProp>();
   const dispatch = useAppDispatch();
 
-  const { doctorId, chemistId } = route.params || {};
+  // Set when opened from the dashboard's call plan (or a doctor's page) to pre-select the party
+  const { doctorId, chemistId, stockistId, fromPlan, returnTo } = route.params || {};
 
   // ── Lookup options (fetched from API; fallbacks used until loaded)
   const [visitTypes, setVisitTypes]     = useState<string[]>(FALLBACK_VISIT_TYPES);
@@ -150,8 +180,8 @@ const LogVisitScreen: React.FC = () => {
   const [callType, setCallType] = useState('Routine');
   const [visitOutcome, setVisitOutcome] = useState('Met');
   const [samples, setSamples] = useState<SampleItem[]>([]);
-  const [isOrderBooked, setIsOrderBooked] = useState(false);
-  const [orderValue, setOrderValue] = useState('');
+  // Chemist/stockist visits: open Book Order (linked to this visit) once the visit is saved
+  const [bookOrder, setBookOrder] = useState(false);
   const [visitDuration, setVisitDuration] = useState('');
   const [remarks, setRemarks] = useState('');
 
@@ -163,6 +193,64 @@ const LogVisitScreen: React.FC = () => {
 
   // ── Loading
   const [saving, setSaving] = useState(false);
+  const [punchingIn, setPunchingIn] = useState(false);
+
+  // Back to where the MR came from (Dashboard, or the Visits list)
+  const leaveScreen = () => {
+    if (returnTo === 'Dashboard') {
+      (navigation as any).navigate(ROUTES.DASHBOARD);
+    } else {
+      navigation.goBack();
+    }
+  };
+
+  // Visits can only be logged while on duty: punched in, and not yet punched out.
+  // The server enforces this too — if the status can't be fetched (offline) we let it decide on save.
+  const ensureOnDuty = async () => {
+    let status;
+    try {
+      status = await attendanceApi.getAttendanceStatus();
+    } catch {
+      return;
+    }
+    if (status.hasPunchedIn && !status.hasPunchedOut) return;
+
+    if (status.hasPunchedOut) {
+      Alert.alert(
+        'Work Day Ended',
+        status.isAutoPunchOut
+          ? "Today was closed automatically because you didn't punch out. Visits can't be logged after that."
+          : "You've punched out for today. Visits can't be logged after punch-out.",
+        [{ text: 'OK', onPress: leaveScreen }],
+        { cancelable: false },
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Punch In First',
+      "You haven't punched in today. Visits can only be logged while you're on duty.",
+      [
+        { text: 'Not Now', style: 'cancel', onPress: leaveScreen },
+        {
+          text: 'Punch In',
+          onPress: async () => {
+            setPunchingIn(true);
+            try {
+              await punchInNow();
+              showAlert('Punched In', 'Your attendance has been recorded. You can log your visit now.');
+            } catch (err) {
+              showAlert('Attendance Error', punchErrorMessage(err));
+              leaveScreen();
+            } finally {
+              setPunchingIn(false);
+            }
+          },
+        },
+      ],
+      { cancelable: false },
+    );
+  };
 
   // ── Photos
   const [photos, setPhotos] = useState<PhotoEntry[]>([]);
@@ -222,8 +310,7 @@ const LogVisitScreen: React.FC = () => {
       setCallType('Routine');
       setVisitOutcome('Met');
       setSamples([]);
-      setIsOrderBooked(false);
-      setOrderValue('');
+      setBookOrder(false);
       setVisitDuration('');
       setRemarks('');
       setPhotos([]);
@@ -238,15 +325,18 @@ const LogVisitScreen: React.FC = () => {
       setProductQuery('');
       setProductResults([]);
       setShowProductDrop(false);
+      ensureOnDuty();
       getCurrentLocation();
       loadLookupOptions();
       if (doctorId) {
-        loadPreselectedDoctor(doctorId);
+        loadPreselectedParty('Doctor / Clinic', () => doctorApi.getDoctorById(doctorId).then(doctorToParty));
       } else if (chemistId) {
-        setVisitType('Chemist / Pharmacy');
+        loadPreselectedParty('Chemist / Pharmacy', () => chemistApi.getChemistById(chemistId).then(chemistToParty));
+      } else if (stockistId) {
+        loadPreselectedParty('Stockist', () => stockistApi.getStockistById(stockistId).then(stockistToParty));
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [doctorId, chemistId]),
+    }, [doctorId, chemistId, stockistId]),
   );
 
 
@@ -265,17 +355,14 @@ const LogVisitScreen: React.FC = () => {
     }
   };
 
-  const loadPreselectedDoctor = async (id: string) => {
+  // Sets the visit type first so the party field and geo-fence check match the pre-selected party;
+  // if the lookup fails the MR can still pick the party by searching
+  const loadPreselectedParty = async (type: string, load: () => Promise<PartyOption>) => {
+    setVisitType(type);
     try {
-      const d = await doctorApi.getDoctorById(id);
-      setSelectedParty({
-        id: d.id,
-        name: d.doctorName,
-        details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
-        geoLocation: d.geoLocation,
-      });
+      setSelectedParty(await load());
     } catch (e) {
-      console.error('loadPreselectedDoctor:', e);
+      console.error('loadPreselectedParty:', e);
     }
   };
 
@@ -303,7 +390,7 @@ const LogVisitScreen: React.FC = () => {
         try {
           const res = await fetch(
             `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
-            { headers: { 'Accept-Language': 'en', 'User-Agent': 'GoodPharmaApp/1.0' } },
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'EterniRoFieldForce/1.0' } },
           );
           const data = await res.json();
           if (data.display_name) address = data.display_name as string;
@@ -326,34 +413,13 @@ const LogVisitScreen: React.FC = () => {
     try {
       if (visitType === 'Doctor / Clinic') {
         const res = await doctorApi.searchDoctors(query);
-        setPartyResults((res || []).map((d: Doctor) => ({
-          id: d.id,
-          name: d.doctorName,
-          details: [d.specialty, d.clinicName, d.address].filter(Boolean).join(' • '),
-          geoLocation: d.geoLocation,
-        })));
+        setPartyResults((res || []).map(doctorToParty));
       } else if (visitType === 'Stockist') {
         const res = await stockistApi.searchStockists(query);
-        setPartyResults((res || []).map(s => ({
-          id: s.id,
-          name: s.stockistName,
-          details: [s.companyName, s.city, s.contactPerson].filter(Boolean).join(' • '),
-          geoLocation:
-            s.latitude !== undefined && s.longitude !== undefined
-              ? { latitude: s.latitude!, longitude: s.longitude! }
-              : undefined,
-        })));
+        setPartyResults((res || []).map(stockistToParty));
       } else {
         const res = await chemistApi.searchChemists(query);
-        setPartyResults((res || []).map((c: Chemist) => ({
-          id: c.id,
-          name: c.pharmacyName || c.chemistName,
-          details: [c.chemistName, c.category, c.address, c.city].filter(Boolean).join(' • '),
-          geoLocation:
-            c.latitude !== undefined && c.longitude !== undefined
-              ? { latitude: c.latitude, longitude: c.longitude }
-              : undefined,
-        })));
+        setPartyResults((res || []).map(chemistToParty));
       }
     } catch (e) {
       console.error('searchParties:', e);
@@ -433,7 +499,9 @@ const LogVisitScreen: React.FC = () => {
       const photo = await cameraRef.current?.takePhoto({ flash });
       if (photo) {
         const uri = Platform.OS === 'android' ? `file://${photo.path}` : photo.path;
-        setPhotos(prev => [...prev, { uri, photoType: 'WithDoctor', caption: '', isFront: cameraFacing === 'front' }]);
+        // The saved JPEG is already upright (front-camera shots carry an EXIF mirror flag only),
+        // so show it as-is — no rotation
+        setPhotos(prev => [...prev, { uri, photoType: 'WithDoctor', caption: '' }]);
         setShowCamera(false);
       }
     } catch (err) {
@@ -515,19 +583,34 @@ const LogVisitScreen: React.FC = () => {
         visitDateTime: visitDateTime.toISOString(),
         latitude: location.latitude,
         longitude: location.longitude,
+        visitAddress: location.address,
         isPlannedVisit: false,
         visitDurationMinutes: visitDuration ? parseInt(visitDuration, 10) : undefined,
         visitType: isDoctorType ? 'Doctor' : visitType === 'Stockist' ? 'Stockist' : 'Chemist',
         callType,
         callOutcome: visitOutcome,
-        isOrderBooked,
-        orderValue: isOrderBooked && orderValue ? parseFloat(orderValue) : undefined,
+        isOrderBooked: false, // set by the server from orders booked against this visit
         nextActionPlan: remarks,
         samples: samples.map(s => ({ productId: s.productId, quantity: s.quantity })),
         photos: uploadedPhotos.length > 0 ? uploadedPhotos : undefined,
       });
       dispatch(addVisit(visit));
-      navigation.goBack();
+      if (bookOrder && !isDoctorType && visitOutcome === 'Met') {
+        (navigation as any).navigate('Orders', {
+          screen: 'BookOrder',
+          initial: false,
+          params: {
+            visitId: visit.id,
+            chemistId: isStockistType ? undefined : selectedParty.id,
+            stockistId: isStockistType ? selectedParty.id : undefined,
+            partyName: selectedParty.name,
+          },
+        });
+        showAlert('Visit Logged', 'Now add the products for this order.');
+        return;
+      }
+      // Opened from Home → return there (Visits pops back to its list when it loses focus)
+      leaveScreen();
       showAlert('Success', 'Visit logged successfully!');
     } catch (err: any) {
       showAlert('Error', err.response?.data?.message || 'Failed to save visit. Please try again.');
@@ -548,6 +631,13 @@ const LogVisitScreen: React.FC = () => {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {fromPlan && (
+          <View style={styles.planBanner}>
+            <MaterialCommunityIcons name="calendar-check" size={16} color={COLORS.primary} />
+            <Text style={styles.planBannerText}>From today's call plan — party filled in for you</Text>
+          </View>
+        )}
+
         <View style={styles.card}>
 
           {/* ── Visit Date & Time ── */}
@@ -777,46 +867,33 @@ const LogVisitScreen: React.FC = () => {
             </View>
           )}
 
-          {/* ── Is Order Booked? ── */}
-          {visitOutcome === 'Met' && (
+          {/* ── Book an Order? (chemists and stockists place orders; doctors don't) ── */}
+          {visitOutcome === 'Met' && visitType !== 'Doctor / Clinic' && (
             <View style={styles.group}>
-              <SectionLabel label="Is Order Booked?" />
+              <SectionLabel label="Book an Order?" />
               <View style={styles.radioRow}>
-                <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(true)}>
+                <TouchableOpacity style={styles.radioOpt} onPress={() => setBookOrder(true)}>
                   <MaterialCommunityIcons
-                    name={isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
+                    name={bookOrder ? 'radiobox-marked' : 'radiobox-blank'}
                     size={22}
-                    color={isOrderBooked ? COLORS.primary : COLORS.textSecondary}
+                    color={bookOrder ? COLORS.primary : COLORS.textSecondary}
                   />
                   <Text style={styles.radioLabel}>Yes</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.radioOpt} onPress={() => setIsOrderBooked(false)}>
+                <TouchableOpacity style={styles.radioOpt} onPress={() => setBookOrder(false)}>
                   <MaterialCommunityIcons
-                    name={!isOrderBooked ? 'radiobox-marked' : 'radiobox-blank'}
+                    name={!bookOrder ? 'radiobox-marked' : 'radiobox-blank'}
                     size={22}
-                    color={!isOrderBooked ? COLORS.primary : COLORS.textSecondary}
+                    color={!bookOrder ? COLORS.primary : COLORS.textSecondary}
                   />
                   <Text style={styles.radioLabel}>No</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          )}
-
-          {/* ── Order Value (conditional) ── */}
-          {visitOutcome === 'Met' && isOrderBooked && (
-            <View style={styles.group}>
-              <SectionLabel label="Order Value (₹)" />
-              <View style={styles.inputRow}>
-                <Text style={[styles.inputText, { color: COLORS.textSecondary }]}>₹</Text>
-                <TextInput
-                  style={[styles.innerInput, { marginLeft: 4 }]}
-                  placeholder="Enter total amount..."
-                  placeholderTextColor={COLORS.textSecondary}
-                  keyboardType="decimal-pad"
-                  value={orderValue}
-                  onChangeText={setOrderValue}
-                />
-              </View>
+              {bookOrder && (
+                <Text style={styles.hintSuccess}>
+                  <MaterialCommunityIcons name="cart-arrow-right" size={11} color={COLORS.success} /> You'll add products after saving the visit
+                </Text>
+              )}
             </View>
           )}
 
@@ -855,7 +932,7 @@ const LogVisitScreen: React.FC = () => {
                   <View key={index} style={styles.photoCard}>
                     <Image
                       source={{ uri: photo.uri }}
-                      style={[styles.photoThumb, photo.isFront && { transform: [{ rotate: '-90deg' }] }]}
+                      style={styles.photoThumb}
                     />
 
                     {/* Type chips */}
@@ -897,7 +974,7 @@ const LogVisitScreen: React.FC = () => {
 
           {/* ── Save Button ── */}
           <Button
-            title="Save Visit Details"
+            title={bookOrder && visitOutcome === 'Met' && visitType !== 'Doctor / Clinic' ? 'Save Visit & Book Order' : 'Save Visit Details'}
             onPress={handleSave}
             loading={saving}
             style={styles.saveBtn}
@@ -1017,7 +1094,7 @@ const LogVisitScreen: React.FC = () => {
         title="Visit Type"
         options={visitTypes}
         selected={visitType}
-        onSelect={v => { setVisitType(v); setSelectedParty(null); setShowVisitTypePicker(false); }}
+        onSelect={v => { setVisitType(v); setSelectedParty(null); setBookOrder(false); setShowVisitTypePicker(false); }}
         onClose={() => setShowVisitTypePicker(false)}
       />
       <PickerModal
@@ -1038,14 +1115,14 @@ const LogVisitScreen: React.FC = () => {
           setShowOutcomePicker(false);
           if (v !== 'Met') {
             setSamples([]);
-            setIsOrderBooked(false);
-            setOrderValue('');
+            setBookOrder(false);
           }
         }}
         onClose={() => setShowOutcomePicker(false)}
       />
 
       <Loading visible={saving} message="Uploading photos and saving visit..." />
+      <Loading visible={punchingIn} message="Punching in..." />
 
       {/* ── Camera Modal ── */}
       <Modal visible={showCamera} animationType="slide" statusBarTranslucent>
@@ -1120,6 +1197,22 @@ const styles = StyleSheet.create({
   content: {
     padding: SIZES.paddingMD,
     paddingBottom: SIZES.paddingXL,
+  },
+  planBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primaryLight,
+    borderRadius: SIZES.radiusMD,
+    paddingHorizontal: SIZES.paddingMD,
+    paddingVertical: SIZES.paddingSM,
+    marginBottom: SIZES.paddingSM,
+  },
+  planBannerText: {
+    flex: 1,
+    fontSize: SIZES.fontSM,
+    fontWeight: '600',
+    color: COLORS.primary,
   },
   card: {
     backgroundColor: COLORS.background,

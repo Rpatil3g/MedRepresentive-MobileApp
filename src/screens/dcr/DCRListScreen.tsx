@@ -67,6 +67,7 @@ const DCRListScreen: React.FC = () => {
   const fetchDCRs = async () => {
     try {
       setError(null);
+      // Keep in step with the backend's rejected-DCR red-dot window (MedicalRepService, 60 days)
       const fromDate = new Date();
       fromDate.setDate(fromDate.getDate() - 60);
       const response = await dcrApi.getMyDCRs({

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   Linking,
+  Image,
 } from 'react-native';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import { Card } from '../../components/common';
@@ -12,7 +13,7 @@ import { COLORS, SIZES } from '../../constants';
 
 const APP_VERSION = '1.0.0';
 const BUILD_NUMBER = '100';
-const COMPANY_NAME = 'EterniRo Technologies';
+const COMPANY_NAME = 'Eterniro Pvt. Ltd.';
 const COMPANY_WEBSITE = 'https://eterniro.com';
 const SUPPORT_EMAIL = 'contact@eterniro.com';
 
@@ -30,10 +31,13 @@ const AboutScreen: React.FC = () => (
 
     {/* App Identity */}
     <View style={styles.hero}>
-      <View style={styles.logoWrap}>
-        <Text style={styles.logoText}>GP</Text>
-      </View>
-      <Text style={styles.appName}>GoodPharma MR</Text>
+      <Image
+        source={require('../../assets/brand/logo-mark.png')}
+        style={styles.logo}
+        resizeMode="contain"
+        accessibilityLabel="EterniRo"
+      />
+      <Text style={styles.appName}>EterniRo Field Force</Text>
       <Text style={styles.tagline}>Field Force Automation for Medical Representatives</Text>
       <View style={styles.versionBadge}>
         <Text style={styles.versionBadgeText}>v{APP_VERSION} · Build {BUILD_NUMBER}</Text>
@@ -75,8 +79,8 @@ const AboutScreen: React.FC = () => (
     <Text style={styles.sectionTitle}>Legal</Text>
     <Card style={styles.card}>
       <Text style={styles.legalText}>
-        GoodPharma MR is proprietary software licensed exclusively for use by authorised
-        medical representatives of registered GoodPharma clients. Unauthorised copying,
+        EterniRo Field Force is proprietary software licensed exclusively for use by authorised
+        medical representatives of registered EterniRo Field Force customers. Unauthorised copying,
         distribution, or reverse engineering is strictly prohibited.
       </Text>
       <Text style={[styles.legalText, { marginTop: SIZES.paddingSM }]}>
@@ -114,24 +118,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: SIZES.paddingXL,
   },
-  logoWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: SIZES.radiusXL,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
+  logo: {
+    width: 88,
+    height: 88,
     marginBottom: SIZES.paddingMD,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  logoText: {
-    fontSize: SIZES.font3XL,
-    fontWeight: 'bold',
-    color: COLORS.textWhite,
   },
   appName: {
     fontSize: SIZES.font3XL,

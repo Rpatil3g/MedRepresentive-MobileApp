@@ -11,6 +11,7 @@ import {
   attendanceReducer,
   tourPlanReducer,
   expenseReducer,
+  alertsReducer,
 } from './slices';
 
 const authPersistConfig = {
@@ -24,7 +25,7 @@ const persistConfig = {
   key: 'root',
   storage: AsyncStorage,
   whitelist: ['user'], // Persist additional non-auth slice data
-  blacklist: ['doctor', 'visit', 'dcr', 'task', 'attendance', 'tourPlan', 'expense'], // Don't persist these (always fetch fresh)
+  blacklist: ['doctor', 'visit', 'dcr', 'task', 'attendance', 'tourPlan', 'expense', 'alerts'], // Don't persist these (always fetch fresh)
 };
 
 // Combine Reducers
@@ -38,6 +39,7 @@ const rootReducer = combineReducers({
   attendance: attendanceReducer,
   tourPlan: tourPlanReducer,
   expense: expenseReducer,
+  alerts: alertsReducer,
 });
 
 // Create Persisted Reducer

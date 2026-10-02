@@ -13,8 +13,13 @@ export interface GpsUpdatePayload {
 }
 
 const liveTrackingApi = {
-  updateLocation: async (data: GpsUpdatePayload): Promise<void> => {
-    await axiosInstance.post(API_CONFIG.ENDPOINTS.LIVE_TRACKING_UPDATE, data);
+  /**
+   * Sends one GPS ping. Returns false once the MR's day is closed (punched out, or auto-closed
+   * by the server) — the caller should stop tracking.
+   */
+  updateLocation: async (data: GpsUpdatePayload): Promise<boolean> => {
+    const response = await axiosInstance.post(API_CONFIG.ENDPOINTS.LIVE_TRACKING_UPDATE, data);
+    return response.data?.trackingActive !== false;
   },
 };
 
